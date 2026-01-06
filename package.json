@@ -1,0 +1,51 @@
+{
+  "name": "mobai-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for MobAI - AI-powered mobile device automation",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mobai-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "mobile",
+    "automation",
+    "android",
+    "ios",
+    "device-control",
+    "ai-agent",
+    "cursor",
+    "claude",
+    "llm"
+  ],
+  "author": "MobAI <contact@mobai.run>",
+  "license": "Apache-2.0",
+  "homepage": "https://github.com/MobAI-App/mobai-mcp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MobAI-App/mobai-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/MobAI-App/mobai-mcp/issues"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0"
+  }
+}
