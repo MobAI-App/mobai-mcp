@@ -1000,6 +1000,17 @@ const NATIVE_RUNNER_GUIDE = `# Native App Automation Guide
 
 Use this for automating native mobile apps (Settings, Mail, Instagram, etc.).
 
+## IMPORTANT: Browser Native UI
+
+When automating browsers (Safari, Chrome), use **Native Runner** for the browser's own UI:
+- Address bar / URL bar
+- Tab bar and tab management
+- Navigation buttons (back, forward, refresh)
+- Bookmarks bar
+- Browser menus and settings
+
+These are native OS elements, NOT web content. Only use Web Runner for the actual webpage content inside the browser.
+
 ## Workflow
 
 1. **Observe UI** - Get the accessibility tree
@@ -1070,7 +1081,25 @@ Use this for automating native mobile apps (Settings, Mail, Instagram, etc.).
 
 const WEB_RUNNER_GUIDE = `# Web Automation Guide
 
-Use this for automating browsers (Safari, Chrome) and WebViews on mobile devices.
+**ONLY spawn Web Runner if you need to interact with the DOM content of a web page or WebView.**
+
+## When to Use Web Runner
+
+✅ **USE Web Runner for:**
+- Interacting with webpage and webview content (buttons, forms, links on the page)
+- Reading/manipulating DOM elements
+- Executing JavaScript in the page context
+- Filling forms on websites
+- Clicking elements inside the rendered webpage
+
+❌ **DO NOT use Web Runner for:**
+- Browser address bar / URL bar → use Native Runner
+- Browser tab bar → use Native Runner
+- Browser navigation buttons (back, forward, refresh) → use Native Runner
+- Browser menus and settings → use Native Runner
+- Any UI outside the webpage or webview content area → use Native Runner
+
+The browser's own UI (address bar, tabs, navigation) are **native OS elements**, not web content.
 
 ## Platform Support
 
