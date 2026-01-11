@@ -908,6 +908,36 @@ const API_REFERENCE = `# MobAI API Reference
 \`\`\`json
 {"error": "message", "code": "ERROR_CODE"}
 \`\`\`
+
+## DSL Action Reference
+
+### type Action
+- **predicate**: Required if keyboard not already open (auto-taps the element first)
+- **dismiss_keyboard**: Default \`false\` (keyboard stays open after typing)
+- **clear_first**: Optional, clears field before typing
+
+\`\`\`json
+{"action": "type", "text": "hello", "predicate": {"type": "input"}}
+\`\`\`
+
+### press_key Action
+- **key**: Keyboard key to press (return, tab, delete, escape, etc.)
+- **context**: Optional, "web" for web context (supports enter, tab, delete, escape)
+
+\`\`\`json
+{"action": "press_key", "key": "return"}
+{"action": "press_key", "key": "tab", "context": "web"}
+\`\`\`
+
+### select_web_context Action
+- **url_contains**: Filter by URL substring
+- **title_contains**: Filter by page title substring
+
+\`\`\`json
+{"action": "select_web_context"}
+{"action": "select_web_context", "url_contains": "example.com"}
+{"action": "select_web_context", "title_contains": "Login"}
+\`\`\`
 `;
 
 const DSL_GUIDE = `# MobAI DSL Guide
@@ -933,7 +963,8 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 |--------|-------------|------------|
 | observe | Get UI tree/screenshot | context, include (ui_tree, screenshot, installed_apps) |
 | tap | Tap element | predicate or coords |
-| type | Type text | text, predicate, clear_first |
+| type | Type text | text, predicate (if keyboard not open), dismiss_keyboard (default: false) |
+| press_key | Press keyboard key | key (return, tab, delete, etc.), context (optional: "web") |
 | toggle | Set switch state | predicate, state ("on"/"off") |
 | swipe | Swipe gesture | direction, distance, duration_ms |
 | scroll | Scroll in container | direction, predicate (container), to_element |
@@ -944,6 +975,7 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 | assert_not_exists | Verify element gone | predicate |
 | delay | Wait fixed time | duration_ms |
 | if_exists | Conditional | predicate, then, else |
+| select_web_context | Select browser/WebView | url_contains, title_contains (optional filters) |
 
 ## Predicates
 
@@ -967,8 +999,10 @@ Match elements by:
 
 ### Type Text
 \`\`\`json
-{"action": "type", "text": "Hello", "clear_first": true}
+{"action": "type", "text": "Hello", "predicate": {"type": "input"}}
 \`\`\`
+
+Note: \`predicate\` is required if keyboard is not already open. Use \`dismiss_keyboard: true\` to close keyboard after typing.
 
 ### Toggle Switch
 \`\`\`json
@@ -1000,6 +1034,31 @@ const NATIVE_RUNNER_GUIDE = `# Native App Automation Guide
 
 Use this for automating native mobile apps (Settings, Mail, Instagram, etc.).
 
+## Script Writing Guidelines
+
+The DSL's purpose is to **minimize LLM calls** by encoding assumptions into comprehensive scripts. Write scripts that handle common scenarios without needing to re-observe.
+
+### Example: Handle Cookie Banner
+\`\`\`json
+{
+  "action": "if_exists",
+  "predicate": {"text_contains": "Accept Cookies"},
+  "then": [{"action": "tap", "predicate": {"text_contains": "Accept"}}]
+}
+\`\`\`
+
+### Common Knowledge (use without observing)
+- Safari has an address bar at the top
+- Settings app has Wi-Fi, Bluetooth, General sections
+- Alert dialogs have "OK", "Cancel", "Allow", "Don't Allow" buttons
+- iOS keyboard has "Done", "Return", "Search" keys
+
+### Script Writing Rules
+- **Use open_app** - Always start scripts with open_app to ensure correct app
+- **UI tree provided upfront** - You receive the initial UI tree, use it to plan the script
+- **Use if_exists for popups** - Handle cookie banners, permission dialogs, notifications
+- **observe only for assert_screen_changed** - Use observe to establish baseline, then assert_screen_changed to verify navigation
+
 ## IMPORTANT: Browser Native UI
 
 When automating browsers (Safari, Chrome), use **Native Runner** for the browser's own UI:
@@ -1015,8 +1074,30 @@ These are native OS elements, NOT web content. Only use Web Runner for the actua
 
 1. **Observe UI** - Get the accessibility tree
 2. **Match Elements** - Use predicates to find elements
-3. **Execute Actions** - Tap, type, swipe, etc.
+3. **Execute Actions** - Tap, type, swipe, press_key, etc.
 4. **Verify Results** - Check UI state changed
+
+## Type Action
+
+The \`type\` action requires either:
+1. Keyboard already open (from previous tap on input), OR
+2. A predicate to identify and tap the input field
+
+**dismiss_keyboard** default is \`false\` (keyboard stays open after typing).
+
+### Pattern 1: Tap then Type
+\`\`\`json
+[
+  {"action": "tap", "predicate": {"type": "input"}},
+  {"action": "type", "text": "username"},
+  {"action": "press_key", "key": "tab"}
+]
+\`\`\`
+
+### Pattern 2: Type with Predicate
+\`\`\`json
+{"action": "type", "text": "username", "predicate": {"type": "input", "label": "Username"}}
+\`\`\`
 
 ## Common Patterns
 
@@ -1039,9 +1120,10 @@ These are native OS elements, NOT web content. Only use Web Runner for the actua
   "version": "0.2",
   "steps": [
     {"action": "tap", "predicate": {"type": "input"}},
-    {"action": "type", "text": "username", "clear_first": true},
-    {"action": "tap", "predicate": {"type": "input", "index": 1}},
-    {"action": "type", "text": "password", "clear_first": true}
+    {"action": "type", "text": "username"},
+    {"action": "press_key", "key": "tab"},
+    {"action": "type", "text": "password"},
+    {"action": "press_key", "key": "return"}
   ]
 }
 \`\`\`
@@ -1071,26 +1153,37 @@ These are native OS elements, NOT web content. Only use Web Runner for the actua
 }
 \`\`\`
 
+## Quick Reference
+
+| Action | Description | Key Fields |
+|--------|-------------|------------|
+| tap | Tap element | predicate or coords |
+| type | Type text | text, predicate (if keyboard not open), dismiss_keyboard (default: false) |
+| press_key | Press keyboard key | key (return, tab, delete, etc.) |
+| swipe | Swipe gesture | direction, distance |
+| scroll | Scroll container | direction, to_element |
+
 ## Tips
 
 - **Always observe first** - Get UI tree before interacting
 - **Use predicates** - More robust than hardcoded indices
 - **Add delays after navigation** - Apps need time to render
 - **Use retry strategy** - Transient failures are common
+- **Use press_key for form navigation** - Tab between fields, Return to submit
 `;
 
 const WEB_RUNNER_GUIDE = `# Web Automation Guide
 
-**ONLY spawn Web Runner if you need to interact with the DOM content of a web page or WebView.**
+**Try native-runner first for simple taps/types.** Only use Web Runner when you need DOM manipulation, CSS selectors, or JavaScript execution.
 
 ## When to Use Web Runner
 
 ✅ **USE Web Runner for:**
-- Interacting with webpage and webview content (buttons, forms, links on the page)
-- Reading/manipulating DOM elements
-- Executing JavaScript in the page context
-- Filling forms on websites
-- Clicking elements inside the rendered webpage
+- Native runner returns NO_MATCH for web elements
+- CSS selector-based element targeting
+- JavaScript execution in page context
+- DOM manipulation and inspection
+- Complex form interactions requiring DOM access
 
 ❌ **DO NOT use Web Runner for:**
 - Browser address bar / URL bar → use Native Runner
@@ -1113,7 +1206,26 @@ The browser's own UI (address bar, tabs, navigation) are **native OS elements**,
 1. **Select web context** - Connect to browser
 2. **Navigate** - Go to URL
 3. **Get DOM** - Inspect page structure
-4. **Interact** - Click, type using CSS selectors
+4. **Interact** - Click, type, press_key using CSS selectors
+
+## select_web_context Options
+
+\`\`\`json
+{"action": "select_web_context"}
+{"action": "select_web_context", "url_contains": "example.com"}
+{"action": "select_web_context", "title_contains": "Login"}
+\`\`\`
+
+Use \`url_contains\` or \`title_contains\` to select a specific tab/WebView when multiple are available.
+
+## press_key (Web Context)
+
+Press keyboard keys in web context. Supported keys: \`enter\`, \`tab\`, \`delete\`, \`escape\`
+
+\`\`\`json
+{"action": "press_key", "context": "web", "key": "enter"}
+{"action": "press_key", "context": "web", "key": "tab"}
+\`\`\`
 
 ## Common Patterns
 
