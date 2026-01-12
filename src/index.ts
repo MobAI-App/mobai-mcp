@@ -1176,16 +1176,22 @@ const WEB_RUNNER_GUIDE = `# Web Automation Guide
 
 **Try native-runner first for simple taps/types.** Only use Web Runner when you need DOM manipulation, CSS selectors, or JavaScript execution.
 
+## iOS Simulator Limitation
+
+**IMPORTANT: Web context is NOT supported on iOS simulators.** Web automation features (select_web_context, web DOM access, CSS selectors, JavaScript execution) only work on:
+- **Physical iOS devices** (iPhone, iPad)
+- **Android emulators and physical devices**
+
 ## When to Use Web Runner
 
-✅ **USE Web Runner for:**
+**USE Web Runner for:**
 - Native runner returns NO_MATCH for web elements
 - CSS selector-based element targeting
 - JavaScript execution in page context
 - DOM manipulation and inspection
 - Complex form interactions requiring DOM access
 
-❌ **DO NOT use Web Runner for:**
+**DO NOT use Web Runner for:**
 - Browser address bar / URL bar → use Native Runner
 - Browser tab bar → use Native Runner
 - Browser navigation buttons (back, forward, refresh) → use Native Runner
