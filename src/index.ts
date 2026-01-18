@@ -397,6 +397,7 @@ Example DSL script:
             steps: {
               type: "array",
               description: "Array of action steps",
+              items: { type: "object" },
             },
             on_fail: {
               type: "object",
