@@ -227,11 +227,15 @@ const TOOLS = [
         },
         verbose: {
           type: "boolean",
-          description: "Include full element coordinates (default: false)",
+          description: "Include detailed elements array with bounds (default: false)",
         },
         only_visible: {
           type: "boolean",
-          description: "Filter to visible elements only (default: true)",
+          description: "Filter to only visible elements (default: true)",
+        },
+        include_keyboard: {
+          type: "boolean",
+          description: "Include keyboard elements in the tree (default: false). Useful for interacting with on-screen keyboards.",
         },
       },
       required: ["device_id"],
@@ -616,6 +620,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const params = new URLSearchParams();
         if (args?.verbose) params.set("verbose", "true");
         if (args?.only_visible === false) params.set("onlyVisible", "false");
+        if (args?.include_keyboard) params.set("includeKeyboard", "true");
         const queryString = params.toString();
         const endpoint = `/devices/${args?.device_id}/ui-tree${queryString ? `?${queryString}` : ""}`;
         result = await makeRequest("GET", endpoint);
