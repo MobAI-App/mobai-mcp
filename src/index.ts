@@ -366,6 +366,20 @@ const TOOLS = [
     },
   },
   {
+    name: "get_ocr",
+    description: "Perform OCR text recognition on the current screen (iOS only). Returns detected text with screen coordinates for tapping (already adjusted for tapping).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
     name: "execute_dsl",
     description: `Execute a batch of automation steps using the DSL (Domain Specific Language).
 This is the PREFERRED method for complex automation as it's more reliable than sequential API calls.
@@ -666,6 +680,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await makeRequest("GET", `/devices/${args?.device_id}/apps`);
         break;
 
+      case "get_ocr":
+        result = await makeRequest("GET", `/devices/${args?.device_id}/ocr`);
+        break;
+
       case "execute_dsl":
         result = await makeRequest(
           "POST",
@@ -862,6 +880,7 @@ const API_REFERENCE = `# MobAI API Reference
 | /devices/{id}/screenshot | GET | Capture screenshot (saved to /tmp/mobai/screenshots/) |
 | /devices/{id}/ui-tree | GET | Get UI accessibility tree |
 | /devices/{id}/apps | GET | List installed apps |
+| /devices/{id}/ocr | GET | OCR text recognition (iOS only) |
 
 ## Bridge Control
 
@@ -967,7 +986,7 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 
 | Action | Description | Key Fields |
 |--------|-------------|------------|
-| observe | Get UI tree/screenshot | context, include (ui_tree, screenshot, installed_apps) |
+| observe | Get UI tree/screenshot/OCR | context, include (ui_tree, screenshot, installed_apps, ocr) |
 | tap | Tap element | predicate or coords |
 | type | Type text | text, predicate (if keyboard not open), dismiss_keyboard (default: false) |
 | press_key | Press keyboard key | key (return, tab, delete, etc.), context (optional: "web") |
@@ -1034,6 +1053,16 @@ Note: \`predicate\` is required if keyboard is not already open. Use \`dismiss_k
 - \`abort\`: Stop on failure (default)
 - \`skip\`: Skip failed step, continue
 - \`retry\`: Retry with delay
+
+## OCR (iOS only)
+
+Use \`include: ["ocr"]\` in observe to get text recognition when UI tree is empty:
+
+\`\`\`json
+{"action": "observe", "context": "native", "include": ["ocr"]}
+\`\`\`
+
+Returns text with coordinates for tapping (already adjusted for tapping).
 `;
 
 const NATIVE_RUNNER_GUIDE = `# Native App Automation Guide
@@ -1104,6 +1133,11 @@ The \`type\` action requires either:
 \`\`\`json
 {"action": "type", "text": "username", "predicate": {"type": "input", "label": "Username"}}
 \`\`\`
+
+### Dismissing Keyboard
+- Use \`press_key: return\` to submit and close the keyboard
+- If submit is not desired, look for a "Close", "Cancel", "Done" or "Back" button in the UI tree and tap it
+- On Android, \`press_key: back\` also dismisses the keyboard
 
 ## Common Patterns
 
@@ -1176,6 +1210,7 @@ The \`type\` action requires either:
 - **Add delays after navigation** - Apps need time to render
 - **Use retry strategy** - Transient failures are common
 - **Use press_key for form navigation** - Tab between fields, Return to submit
+- **Use OCR for system dialogs (iOS)** - When UI tree is empty, use \`include: ["ocr"]\`
 `;
 
 const WEB_RUNNER_GUIDE = `# Web Automation Guide
