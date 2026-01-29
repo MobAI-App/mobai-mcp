@@ -1,6 +1,7 @@
 {
   "name": "mobai-mcp",
-  "version": "1.1.0",
+  "version": "1.2.0",
+  "mcpName": "io.github.mobai-app/mobai-mcp",
   "description": "MCP server for MobAI - AI-powered mobile device automation",
   "type": "module",
   "main": "dist/index.js",
@@ -9,6 +10,7 @@
   },
   "files": [
     "dist",
+    "server.json",
     "README.md",
     "LICENSE"
   ],
@@ -42,7 +44,7 @@
     "url": "https://github.com/MobAI-App/mobai-mcp/issues"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0"
+    "@modelcontextprotocol/sdk": "^1.25.3"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
