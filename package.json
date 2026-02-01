@@ -1,6 +1,6 @@
 {
   "name": "mobai-mcp",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "mcpName": "io.github.MobAI-App/mobai-mcp",
   "description": "MCP server for MobAI - AI-powered mobile device automation",
   "type": "module",
