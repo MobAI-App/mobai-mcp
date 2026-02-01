@@ -911,6 +911,15 @@ const API_REFERENCE = `# MobAI API Reference
 |----------|--------|-------------|
 | /devices/{id}/agent/run | POST | Run AI agent: {"task": "..."} |
 
+## Performance Metrics
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| /devices/{id}/metrics/start | POST | Start metrics collection |
+| /devices/{id}/metrics/stop | POST | Stop collection, return summary |
+| /devices/{id}/metrics | GET | Get raw metrics buffer |
+| /devices/{id}/metrics/summary | GET | Get current summary without stopping |
+
 ## Web Automation
 
 | Endpoint | Method | Description |
@@ -1001,6 +1010,8 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 | delay | Wait fixed time | duration_ms |
 | if_exists | Conditional | predicate, then, else |
 | select_web_context | Select browser/WebView | url_contains, title_contains (optional filters) |
+| metrics_start | Start performance monitoring | types, bundle_id, label, thresholds, capture_logs |
+| metrics_stop | Stop monitoring, get summary | format ("summary" or "detailed") |
 
 ## Predicates
 
@@ -1063,6 +1074,86 @@ Use \`include: ["ocr"]\` in observe to get text recognition when UI tree is empt
 \`\`\`
 
 Returns text with coordinates for tapping (already adjusted for tapping).
+
+## Performance Metrics
+
+Collect CPU, memory, FPS, network, and battery metrics during test flows with optional logging capture.
+
+### Start Metrics Collection
+\`\`\`json
+{
+  "action": "metrics_start",
+  "types": ["system_cpu", "system_memory", "fps"],
+  "bundle_id": "com.example.app",
+  "label": "login_flow",
+  "capture_logs": true,
+  "thresholds": {
+    "cpu_high": 80,
+    "fps_low": 45,
+    "memory_growth_mb_min": 50
+  }
+}
+\`\`\`
+
+**Fields:**
+- \`types\`: Metrics to collect - system_cpu, system_memory, fps, network, battery, process
+- \`bundle_id\`: Filter to specific app (optional)
+- \`label\`: Human-readable session label (optional)
+- \`thresholds\`: Custom thresholds for anomaly detection (optional)
+- \`capture_logs\`: Capture device logs during session (default: false)
+
+### Stop and Get Summary
+\`\`\`json
+{"action": "metrics_stop", "format": "summary"}
+\`\`\`
+
+**Response:**
+\`\`\`json
+{
+  "metrics_summary": {
+    "session": {
+      "label": "login_flow",
+      "duration_seconds": 45.2,
+      "sample_count": 45,
+      "session_id": "abc123",
+      "data_file": "/tmp/mobai/metrics/abc123.jsonl",
+      "logs_file": "/tmp/mobai/logs/abc123.jsonl",
+      "logs_available": true
+    },
+    "overall_health": "warning",
+    "health_score": 72,
+    "system_cpu": {"avg": 34.5, "max": 89.2, "p95": 78.1, "status": "ok"},
+    "system_memory": {"avg_percent": 45.2, "growth_mb": 28.5, "trend": "increasing", "status": "warning"},
+    "fps": {"avg": 58.2, "min": 24.0, "jank_percent": 8.5, "status": "warning"},
+    "anomalies": {
+      "cpu_spikes": [
+        {"at_s": 0.5, "peak": 288, "duration_ms": 18147, "source": "system"}   
+      ],
+      "fps_drops": [
+        {"start_s": 1.2, "end_s": 16.8, "min_fps": 39.5, "avg_fps": 42.3, "samples": 1}
+      ],
+    },
+    "recommendations": [
+      "FPS dropped to 24 at +15s - investigate screen transition"
+    ]
+  }
+}
+\`\`\`
+
+### Example: Performance Test Flow
+\`\`\`json
+{
+  "version": "0.2",
+  "steps": [
+    {"action": "metrics_start", "types": ["system_cpu", "system_memory", "fps"], "label": "app_launch"},
+    {"action": "open_app", "bundle_id": "com.example.app"},
+    {"action": "wait_for", "predicate": {"text": "Welcome"}, "timeout_ms": 10000},
+    {"action": "tap", "predicate": {"text": "Login"}},
+    {"action": "delay", "duration_ms": 5000},
+    {"action": "metrics_stop", "format": "summary"}
+  ]
+}
+\`\`\`
 `;
 
 const NATIVE_RUNNER_GUIDE = `# Native App Automation Guide
