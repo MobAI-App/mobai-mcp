@@ -268,6 +268,136 @@ const TOOLS = [
     },
   },
   {
+    name: "double_tap",
+    description: "Double tap an element by index (from UI tree) or coordinates",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        index: {
+          type: "number",
+          description: "Element index from UI tree (preferred)",
+        },
+        x: {
+          type: "number",
+          description: "X coordinate (use with y instead of index)",
+        },
+        y: {
+          type: "number",
+          description: "Y coordinate (use with x instead of index)",
+        },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
+    name: "long_press",
+    description: "Long press an element by index (from UI tree) or coordinates. Uses a fixed 0.5s hold duration.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        index: {
+          type: "number",
+          description: "Element index from UI tree (preferred)",
+        },
+        x: {
+          type: "number",
+          description: "X coordinate (use with y instead of index)",
+        },
+        y: {
+          type: "number",
+          description: "Y coordinate (use with x instead of index)",
+        },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
+    name: "two_finger_tap",
+    description: "Perform a two-finger tap at coordinates (iOS only)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        index: {
+          type: "number",
+          description: "Element index from UI tree (preferred)",
+        },
+        x: {
+          type: "number",
+          description: "X coordinate (use with y instead of index)",
+        },
+        y: {
+          type: "number",
+          description: "Y coordinate (use with x instead of index)",
+        },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
+    name: "drag",
+    description: "Drag from one point to another (press, hold, move, release)",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        from_x: {
+          type: "number",
+          description: "Starting X coordinate",
+        },
+        from_y: {
+          type: "number",
+          description: "Starting Y coordinate",
+        },
+        to_x: {
+          type: "number",
+          description: "Ending X coordinate",
+        },
+        to_y: {
+          type: "number",
+          description: "Ending Y coordinate",
+        },
+        duration_ms: {
+          type: "number",
+          description: "Drag duration in milliseconds (default: 500)",
+        },
+        press_duration_ms: {
+          type: "number",
+          description: "Hold duration before dragging in milliseconds (0 = no hold). Use for press-and-drag gestures like moving app icons.",
+        },
+      },
+      required: ["device_id", "from_x", "from_y", "to_x", "to_y"],
+    },
+  },
+  {
+    name: "dismiss_keyboard",
+    description: "Dismiss the on-screen keyboard if visible",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
     name: "type_text",
     description: "Type text on the device (tap input field first to focus)",
     inputSchema: {
@@ -384,7 +514,7 @@ const TOOLS = [
     description: `Execute a batch of automation steps using the DSL (Domain Specific Language).
 This is the PREFERRED method for complex automation as it's more reliable than sequential API calls.
 
-DSL supports: observe, tap, type, toggle, swipe, scroll, open_app, navigate, wait_for, assert_*, if_exists, delay, execute_js (web)
+DSL supports: observe, tap, type, toggle, swipe, scroll, open_app, kill_app, navigate, wait_for, screenshot, set_location, reset_location, assert_*, if_exists, delay, execute_js (web)
 
 Example DSL script:
 {
@@ -560,6 +690,78 @@ Example DSL script:
     },
   },
   {
+    name: "uninstall_app",
+    description: "Uninstall an application from the device by bundle ID / package name.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        bundle_id: {
+          type: "string",
+          description: "App bundle ID (iOS) or package name (Android) to uninstall",
+        },
+      },
+      required: ["device_id", "bundle_id"],
+    },
+  },
+  {
+    name: "kill_app",
+    description: "Force-kill a running application. On iOS (17+), uses CoreDevice appservice SIGKILL. On Android, uses 'am force-stop'.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        bundle_id: {
+          type: "string",
+          description: "Bundle ID / package name of the app to kill",
+        },
+      },
+      required: ["device_id", "bundle_id"],
+    },
+  },
+  {
+    name: "set_location",
+    description: "Set a simulated GPS location on the device. Supports: iOS (all versions), Android emulators (all versions), Android real devices (12+ only).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+        lat: {
+          type: "number",
+          description: "Latitude (-90 to 90)",
+        },
+        lon: {
+          type: "number",
+          description: "Longitude (-180 to 180)",
+        },
+      },
+      required: ["device_id", "lat", "lon"],
+    },
+  },
+  {
+    name: "reset_location",
+    description: "Reset the device location to its real GPS position, removing any simulated location. Supports: iOS (all versions), Android emulators (all versions), Android real devices (12+ only).",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: {
+          type: "string",
+          description: "Device ID",
+        },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
     name: "http_request",
     description: `Make a raw HTTP request to the MobAI API. Use this for advanced operations not covered by other tools.
 
@@ -652,6 +854,58 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         break;
       }
 
+      case "double_tap": {
+        const body: any = {};
+        if (args?.index !== undefined) body.index = args.index;
+        if (args?.x !== undefined && args?.y !== undefined) {
+          body.x = args.x;
+          body.y = args.y;
+        }
+        result = await makeRequest("POST", `/devices/${args?.device_id}/double-tap`, body);
+        break;
+      }
+
+      case "long_press": {
+        const body: any = {};
+        if (args?.index !== undefined) body.index = args.index;
+        if (args?.x !== undefined && args?.y !== undefined) {
+          body.x = args.x;
+          body.y = args.y;
+        }
+        result = await makeRequest("POST", `/devices/${args?.device_id}/long-press`, body);
+        break;
+      }
+
+      case "two_finger_tap": {
+        const body: any = {};
+        if (args?.index !== undefined) body.index = args.index;
+        if (args?.x !== undefined && args?.y !== undefined) {
+          body.x = args.x;
+          body.y = args.y;
+        }
+        result = await makeRequest("POST", `/devices/${args?.device_id}/two-finger-tap`, body);
+        break;
+      }
+
+      case "drag": {
+        const dragBody: Record<string, unknown> = {
+          fromX: args?.from_x,
+          fromY: args?.from_y,
+          toX: args?.to_x,
+          toY: args?.to_y,
+          duration: args?.duration_ms ?? 500,
+        };
+        if (args?.press_duration_ms) {
+          dragBody.pressDuration = args.press_duration_ms;
+        }
+        result = await makeRequest("POST", `/devices/${args?.device_id}/drag`, dragBody);
+        break;
+      }
+
+      case "dismiss_keyboard":
+        result = await makeRequest("POST", `/devices/${args?.device_id}/dismiss-keyboard`);
+        break;
+
       case "type_text":
         result = await makeRequest("POST", `/devices/${args?.device_id}/type`, { text: args?.text });
         break;
@@ -682,6 +936,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case "get_ocr":
         result = await makeRequest("GET", `/devices/${args?.device_id}/ocr`);
+        break;
+
+      case "uninstall_app":
+        result = await makeRequest("DELETE", `/devices/${args?.device_id}/apps/${encodeURIComponent(args?.bundle_id as string)}`);
+        break;
+
+      case "kill_app":
+        result = await makeRequest("POST", `/devices/${args?.device_id}/kill-app`, {
+          bundleId: args?.bundle_id,
+        });
+        break;
+
+      case "set_location":
+        result = await makeRequest("POST", `/devices/${args?.device_id}/location`, {
+          lat: args?.lat,
+          lon: args?.lon,
+        });
+        break;
+
+      case "reset_location":
+        result = await makeRequest("DELETE", `/devices/${args?.device_id}/location`);
         break;
 
       case "execute_dsl":
@@ -894,10 +1169,17 @@ const API_REFERENCE = `# MobAI API Reference
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | /devices/{id}/tap | POST | Tap element: {"index": N} or {"x": X, "y": Y} |
+| /devices/{id}/double-tap | POST | Double tap: {"index": N} or {"x": X, "y": Y} |
+| /devices/{id}/long-press | POST | Long press (0.5s): {"index": N} or {"x": X, "y": Y} |
+| /devices/{id}/two-finger-tap | POST | Two-finger tap (iOS): {"index": N} or {"x": X, "y": Y} |
 | /devices/{id}/swipe | POST | Swipe: {"fromX", "fromY", "toX", "toY", "duration"} |
+| /devices/{id}/drag | POST | Drag: {"fromX", "fromY", "toX", "toY", "duration", "pressDuration"} |
 | /devices/{id}/type | POST | Type text: {"text": "..."} |
+| /devices/{id}/dismiss-keyboard | POST | Dismiss on-screen keyboard |
 | /devices/{id}/go-home | POST | Go to home screen |
 | /devices/{id}/launch-app | POST | Launch app: {"bundleId": "..."} |
+| /devices/{id}/apps/{bundleId} | DELETE | Uninstall app by bundle ID |
+| /devices/{id}/kill-app | POST | Kill app: {"bundleId": "..."} |
 
 ## DSL Execution
 
@@ -1004,12 +1286,16 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 | scroll | Scroll in container | direction, predicate (container), to_element |
 | open_app | Launch app | bundle_id |
 | navigate | Go home/back | target ("home", "back") |
-| wait_for | Wait for element | predicate, timeout_ms |
+| wait_for | Wait for element or UI stability | predicate, timeout_ms, poll_interval_ms, stable (wait for UI to stop changing) |
+| screenshot | Save screenshot to file | file_path (directory), name (optional filename) |
 | assert_exists | Verify element exists | predicate, timeout_ms |
 | assert_not_exists | Verify element gone | predicate |
 | delay | Wait fixed time | duration_ms |
 | if_exists | Conditional | predicate, then, else |
 | select_web_context | Select browser/WebView | url_contains, title_contains (optional filters) |
+| kill_app | Force-kill running app | bundle_id |
+| set_location | Simulate GPS location (Android 12+ for real devices) | lat, lon |
+| reset_location | Reset to real GPS (Android 12+ for real devices) | (no fields) |
 | metrics_start | Start performance monitoring | types, bundle_id, label, thresholds, capture_logs |
 | metrics_stop | Stop monitoring, get summary | format ("summary" or "detailed") |
 
