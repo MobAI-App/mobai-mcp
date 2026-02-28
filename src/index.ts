@@ -237,6 +237,21 @@ const TOOLS = [
           type: "boolean",
           description: "Include keyboard elements in the tree (default: false). Useful for interacting with on-screen keyboards.",
         },
+        text_regex: {
+          type: "string",
+          description: "Regex to filter elements by text/value/contentDesc. Only matching elements are returned.",
+        },
+        bounds: {
+          type: "object",
+          description: "Filter to elements within a bounding rectangle",
+          properties: {
+            x: { type: "number", description: "Left X coordinate" },
+            y: { type: "number", description: "Top Y coordinate" },
+            w: { type: "number", description: "Width" },
+            h: { type: "number", description: "Height" },
+          },
+          required: ["x", "y", "w", "h"],
+        },
       },
       required: ["device_id"],
     },
@@ -837,6 +852,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (args?.verbose) params.set("verbose", "true");
         if (args?.only_visible === false) params.set("onlyVisible", "false");
         if (args?.include_keyboard) params.set("includeKeyboard", "true");
+        if (args?.text_regex) params.set("textRegex", args.text_regex as string);
+        if (args?.bounds) {
+          const b = args.bounds as { x: number; y: number; w: number; h: number };
+          params.set("boundsX", String(b.x));
+          params.set("boundsY", String(b.y));
+          params.set("boundsW", String(b.w));
+          params.set("boundsH", String(b.h));
+        }
         const queryString = params.toString();
         const endpoint = `/devices/${args?.device_id}/ui-tree${queryString ? `?${queryString}` : ""}`;
         result = await makeRequest("GET", endpoint);
@@ -1277,7 +1300,7 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 
 | Action | Description | Key Fields |
 |--------|-------------|------------|
-| observe | Get UI tree/screenshot/OCR | context, include (ui_tree, screenshot, installed_apps, ocr) |
+| observe | Get UI tree/screenshot/OCR | context, include (ui_tree, screenshot, installed_apps, ocr), filter ({text_regex, bounds}) |
 | tap | Tap element | predicate or coords |
 | type | Type text | text, predicate (if keyboard not open), dismiss_keyboard (default: false) |
 | press_key | Press keyboard key | key (return, tab, delete, etc.), context (optional: "web") |

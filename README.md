@@ -88,7 +88,7 @@ Configure according to your client's MCP server setup. The server uses stdio tra
 
 ### UI Automation
 - `get_screenshot` - Capture device screenshot
-- `get_ui_tree` - Get accessibility tree
+- `get_ui_tree` - Get accessibility tree (supports text_regex and bounds filtering)
 - `tap` - Tap element by index or coordinates
 - `type_text` - Type text
 - `swipe` - Perform swipe gesture
