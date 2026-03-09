@@ -203,13 +203,21 @@ const TOOLS = [
   },
   {
     name: "get_screenshot",
-    description: "Capture a screenshot from the device. Returns the file path to the saved PNG.",
+    description: "Capture a screenshot from the device. By default saves to /tmp/mobai/screenshots/ and returns the file path. Use path/name to save to a custom location on the host computer.",
     inputSchema: {
       type: "object" as const,
       properties: {
         device_id: {
           type: "string",
           description: "Device ID",
+        },
+        path: {
+          type: "string",
+          description: "Custom directory to save the screenshot (supports ~/). Example: ~/Downloads",
+        },
+        name: {
+          type: "string",
+          description: "Custom filename without .png extension. Defaults to timestamp-based name.",
         },
       },
       required: ["device_id"],
@@ -843,9 +851,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         result = await makeRequest("POST", `/devices/${args?.device_id}/bridge/stop`);
         break;
 
-      case "get_screenshot":
-        result = await makeRequest("GET", `/devices/${args?.device_id}/screenshot`);
+      case "get_screenshot": {
+        const screenshotParams = new URLSearchParams();
+        if (args?.path) screenshotParams.set("path", args.path as string);
+        if (args?.name) screenshotParams.set("name", args.name as string);
+        const screenshotQuery = screenshotParams.toString();
+        result = await makeRequest("GET", `/devices/${args?.device_id}/screenshot${screenshotQuery ? "?" + screenshotQuery : ""}`);
         break;
+      }
 
       case "get_ui_tree": {
         const params = new URLSearchParams();
@@ -1302,21 +1315,29 @@ The DSL (Domain Specific Language) enables batch execution of multiple automatio
 |--------|-------------|------------|
 | observe | Get UI tree/screenshot/OCR | context, include (ui_tree, screenshot, installed_apps, ocr), filter ({text_regex, bounds}) |
 | tap | Tap element | predicate or coords |
-| type | Type text | text, predicate (if keyboard not open), dismiss_keyboard (default: false) |
+| double_tap | Double-tap element | predicate or coords |
+| long_press | Long-press element | predicate or coords, duration_ms (default: 1000) |
+| two_finger_tap | Two-finger tap element | predicate or coords |
+| type | Type text | text, predicate (if keyboard not open), clear_first, dismiss_keyboard (default: false) |
 | press_key | Press keyboard key | key (return, tab, delete, etc.), context (optional: "web") |
 | toggle | Set switch state | predicate, state ("on"/"off") |
-| swipe | Swipe gesture | direction, distance, duration_ms |
-| scroll | Scroll in container | direction, predicate (container), to_element |
+| swipe | Swipe gesture | direction, distance, duration_ms, or from_coords/to_coords |
+| scroll | Scroll in container | direction, predicate (container), to_element, max_scrolls |
+| drag | Drag element to target | from (predicate), to_element (predicate), or from_coords/to_coords, duration_ms, press_duration_ms |
 | open_app | Launch app | bundle_id |
+| kill_app | Force-kill running app | bundle_id |
 | navigate | Go home/back | target ("home", "back") |
 | wait_for | Wait for element or UI stability | predicate, timeout_ms, poll_interval_ms, stable (wait for UI to stop changing) |
+| delay | Wait fixed time | duration_ms |
 | screenshot | Save screenshot to file | file_path (directory), name (optional filename) |
 | assert_exists | Verify element exists | predicate, timeout_ms |
 | assert_not_exists | Verify element gone | predicate |
-| delay | Wait fixed time | duration_ms |
+| assert_count | Verify element count | predicate, count |
+| assert_screen_changed | Verify screen changed | (compared to last observe) |
+| checkpoint | Mark a test checkpoint | name |
 | if_exists | Conditional | predicate, then, else |
 | select_web_context | Select browser/WebView | url_contains, title_contains (optional filters) |
-| kill_app | Force-kill running app | bundle_id |
+| execute_js | Run JavaScript in web context | script |
 | set_location | Simulate GPS location (Android 12+ for real devices) | lat, lon |
 | reset_location | Reset to real GPS (Android 12+ for real devices) | (no fields) |
 | metrics_start | Start performance monitoring | types, bundle_id, label, thresholds, capture_logs |
@@ -1329,11 +1350,14 @@ Match elements by:
 - \`text_contains\`: Contains substring (case-insensitive)
 - \`text_starts_with\`: Starts with prefix
 - \`text_regex\`: Regex pattern
-- \`type\`: Element type (button, input, switch, etc.)
-- \`label\`: Accessibility label
-- \`bounds_hint\`: Screen region (top_half, bottom_half, center, etc.)
-- \`near\`: Near another element
-- \`index\`: Select Nth match
+- \`type\`: Element type (button, input, switch, text, image, cell, scrollview)
+- \`label\`: Accessibility label (exact)
+- \`label_contains\`: Accessibility label (partial)
+- \`bounds_hint\`: Screen region (top_half, bottom_half, left_half, right_half, center)
+- \`near\`: Near another element: {"text": "Label"} or {"text": "Label", "direction": "below"}
+- \`index\`: Select Nth match (0-based)
+- \`parent_of\`: Find parent containing child: {"parent_of": {"text": "child"}}
+- \`enabled\`/\`visible\`/\`selected\`: Boolean state filters
 
 ## Examples
 
@@ -1349,9 +1373,30 @@ Match elements by:
 
 Note: \`predicate\` is required if keyboard is not already open. Use \`dismiss_keyboard: true\` to close keyboard after typing.
 
+### Double Tap
+\`\`\`json
+{"action": "double_tap", "predicate": {"text": "Image"}}
+\`\`\`
+
+### Long Press
+\`\`\`json
+{"action": "long_press", "predicate": {"text": "Message"}, "duration_ms": 1500}
+\`\`\`
+
 ### Toggle Switch
 \`\`\`json
 {"action": "toggle", "predicate": {"type": "switch", "text_contains": "WiFi"}, "state": "on"}
+\`\`\`
+
+### Drag Element
+\`\`\`json
+{"action": "drag", "from": {"predicate": {"text": "Item"}}, "to_element": {"predicate": {"text": "Trash"}}}
+{"action": "drag", "from_coords": {"x": 100, "y": 200}, "to_coords": {"x": 300, "y": 400}, "duration_ms": 500}
+\`\`\`
+
+### Assert Count
+\`\`\`json
+{"action": "assert_count", "predicate": {"type": "cell"}, "count": 5}
 \`\`\`
 
 ### Scroll Until Found
@@ -1598,10 +1643,14 @@ The \`type\` action requires either:
 | Action | Description | Key Fields |
 |--------|-------------|------------|
 | tap | Tap element | predicate or coords |
-| type | Type text | text, predicate (if keyboard not open), dismiss_keyboard (default: false) |
+| double_tap | Double-tap element | predicate or coords |
+| long_press | Long-press element | predicate or coords, duration_ms |
+| type | Type text | text, predicate (if keyboard not open), clear_first, dismiss_keyboard |
 | press_key | Press keyboard key | key (return, tab, delete, etc.) |
-| swipe | Swipe gesture | direction, distance |
-| scroll | Scroll container | direction, to_element |
+| toggle | Set switch state | predicate, state ("on"/"off") |
+| swipe | Swipe gesture | direction, distance, duration_ms, or from_coords/to_coords |
+| scroll | Scroll container | direction, to_element, max_scrolls |
+| drag | Drag element | from/to_element (predicates), or from_coords/to_coords |
 
 ## Tips
 
