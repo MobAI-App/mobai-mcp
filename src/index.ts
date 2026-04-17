@@ -127,8 +127,6 @@ async function doRequest(
 const doGet = (p: string) => doRequest("GET", p);
 const doPost = (p: string, body?: any) => doRequest("POST", p, body);
 const doDelete = (p: string) => doRequest("DELETE", p);
-const doPut = (p: string, body?: any) => doRequest("PUT", p, body);
-const doPatch = (p: string, body?: any) => doRequest("PATCH", p, body);
 
 function textResult(data: any) {
   return {
@@ -153,8 +151,8 @@ const server = new Server(
   {
     capabilities: { tools: {}, resources: {} },
     instructions: `MobAI controls Android and iOS devices. Before starting any device task, read the relevant MCP resources:
-- mobai://reference/device-automation — how to control devices
-- mobai://reference/testing — testing workflow, rules, and .mob script syntax
+- mobai://reference/device-automation — how to control devices (read before ANY device interaction)
+- mobai://reference/testing — .mob script syntax (read ONLY when user asks to create or fix test scripts)
 Check available skills in current work directory and load any relevant to the user's request.`,
   }
 );
@@ -201,7 +199,7 @@ const TOOLS = [
   {
     name: "get_screenshot",
     description:
-      "Capture a fast, low-quality screenshot for LLM visual analysis. Returns the file path to the saved image. Use this for AI/LLM processing only — for full-quality screenshots use save_screenshot instead.",
+      "Capture a fast, low-quality screenshot for LLM visual analysis. Returns the file path to the saved image. The image may be downscaled by an integer factor so its long edge stays ≤ 2000px; when that happens the response includes a scale factor — multiply any coordinates you read off the image by that factor before using them in device actions (tap, swipe, drag, long-press, etc.). UI tree coordinates are already in device pixels, do not scale those. Use this for AI/LLM processing only — for full-quality screenshots use save_screenshot instead.",
     inputSchema: {
       type: "object" as const,
       properties: { device_id: { type: "string", description: "Device ID" } },
@@ -220,6 +218,21 @@ const TOOLS = [
         name: { type: "string", description: "Optional filename (without .png extension)" },
       },
       required: ["device_id"],
+    },
+  },
+  // Debug launch
+  {
+    name: "debug_app",
+    description:
+      "Launch an app in debug mode and write logs to a file. Returns the log file path — use Read/Grep to inspect logs. Use kill_app to stop.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        bundle_id: { type: "string", description: "Bundle ID of the app to debug" },
+        log_path: { type: "string", description: "Directory for log file (supports ~/). Defaults to OS temp directory." },
+      },
+      required: ["device_id", "bundle_id"],
     },
   },
   // App management
@@ -261,7 +274,7 @@ const TOOLS = [
     name: "execute_dsl",
     description: `Execute a batch of DSL commands on a device. This is the primary tool for all device interaction — tap, type, swipe, observe, launch apps, assertions, web automation, and more.
 
-Read the MCP resource mobai://reference/device-automation to learn how to control devices before using this tool.
+You MUST read the MCP resource mobai://reference/device-automation to learn how to control devices before using this tool.
 
 Input: JSON string with "version": "0.2" and "steps" array. Example:
 {"version":"0.2","steps":[
@@ -281,150 +294,26 @@ Input: JSON string with "version": "0.2" and "steps" array. Example:
   // Test management
   {
     name: "test_get_active",
-    description: "Get the currently active test project and its cases. Use this to discover which test cases are available.",
+    description:
+      "Get the currently active test project directory and its .mob test cases. Use this to discover the project path and available tests. The agent can then read/write/create/delete .mob files directly in the returned directory.",
     inputSchema: { type: "object" as const, properties: {}, required: [] },
   },
   {
     name: "test_list_projects",
-    description: "List all test projects with their test cases included inline",
+    description: "List all known test project directories with their .mob test cases. Each project is a directory containing .mob script files.",
     inputSchema: { type: "object" as const, properties: {}, required: [] },
   },
   {
-    name: "test_create_project",
-    description: "Create a new test project",
-    inputSchema: {
-      type: "object" as const,
-      properties: { name: { type: "string", description: "Project name" } },
-      required: ["name"],
-    },
-  },
-  {
-    name: "test_rename_project",
-    description: "Rename an existing test project",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        name: { type: "string", description: "New project name" },
-      },
-      required: ["project_id", "name"],
-    },
-  },
-  {
-    name: "test_create_case",
-    description: "Create a new test case in a project",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        name: { type: "string", description: "Test case name" },
-        folder: { type: "string", description: "Optional folder path within the project" },
-      },
-      required: ["project_id", "name"],
-    },
-  },
-  {
-    name: "test_rename_case",
-    description: "Rename an existing test case",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-        name: { type: "string", description: "New test case name" },
-      },
-      required: ["project_id", "case_id", "name"],
-    },
-  },
-  {
-    name: "test_delete_case",
-    description: "Delete a test case from a project",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-      },
-      required: ["project_id", "case_id"],
-    },
-  },
-  {
-    name: "test_get_script",
-    description: "Get the .mob script content for a test case (with 1-based line numbers)",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-      },
-      required: ["project_id", "case_id"],
-    },
-  },
-  {
-    name: "test_replace_script",
-    description: "Replace the entire .mob script for a test case",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-        script: { type: "string", description: "New script content (without line numbers)" },
-      },
-      required: ["project_id", "case_id", "script"],
-    },
-  },
-  {
-    name: "test_update_line",
-    description: "Update a single line in the .mob script",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-        line_number: { type: "number", description: "1-based line number to update" },
-        content: { type: "string", description: "New line content" },
-      },
-      required: ["project_id", "case_id", "line_number", "content"],
-    },
-  },
-  {
-    name: "test_insert_after",
-    description: "Insert a new line after the specified line number in the .mob script",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-        line_number: { type: "number", description: "1-based line number to insert after (0 = insert at beginning)" },
-        content: { type: "string", description: "Line content to insert" },
-      },
-      required: ["project_id", "case_id", "line_number", "content"],
-    },
-  },
-  {
-    name: "test_delete_line",
-    description: "Delete a line from the .mob script",
-    inputSchema: {
-      type: "object" as const,
-      properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
-        line_number: { type: "number", description: "1-based line number to delete" },
-      },
-      required: ["project_id", "case_id", "line_number"],
-    },
-  },
-  {
     name: "test_run",
-    description: "Run a test case on a device",
+    description: "Run a .mob test case on a device. The case_path is relative to the project directory.",
     inputSchema: {
       type: "object" as const,
       properties: {
-        project_id: { type: "string", description: "Project ID" },
-        case_id: { type: "string", description: "Test case ID" },
+        project_dir: { type: "string", description: "Absolute path to the project directory" },
+        case_path: { type: "string", description: "Relative path to the .mob file within the project, e.g. auth/login.mob" },
         device_id: { type: "string", description: "Device ID to run the test on" },
       },
-      required: ["project_id", "case_id", "device_id"],
+      required: ["project_dir", "case_path", "device_id"],
     },
   },
 ];
@@ -440,13 +329,6 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 // ---------------------------------------------------------------------------
 // Tool call handler
 // ---------------------------------------------------------------------------
-
-function testCasePath(args: any): string {
-  const projectId = args?.project_id;
-  const caseId = args?.case_id;
-  if (!projectId || !caseId) throw new Error("project_id and case_id are required");
-  return `/tests/projects/${projectId}/cases/${caseId}`;
-}
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
@@ -482,6 +364,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       // App management
+      case "debug_app": {
+        const body: any = { bundleId: args?.bundle_id };
+        if (args?.log_path) body.logPath = args.log_path;
+        return textResult(await doPost(`/devices/${args?.device_id}/debug/launch`, body));
+      }
+
       case "list_apps":
         return textResult(await doGet(`/devices/${args?.device_id}/apps`));
 
@@ -512,65 +400,12 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "test_list_projects":
         return textResult(await doGet("/tests/projects"));
 
-      case "test_create_project":
-        return textResult(await doPost("/tests/projects", { name: args?.name }));
-
-      case "test_rename_project":
-        return textResult(await doPatch(`/tests/projects/${args?.project_id}`, { name: args?.name }));
-
-      case "test_create_case": {
-        const body: any = { name: args?.name };
-        if (args?.folder) body.folder = args.folder;
-        return textResult(await doPost(`/tests/projects/${args?.project_id}/cases`, body));
-      }
-
-      case "test_rename_case": {
-        const p = testCasePath(args);
-        return textResult(await doPatch(p, { name: args?.name }));
-      }
-
-      case "test_delete_case": {
-        const p = testCasePath(args);
-        return textResult(await doDelete(p));
-      }
-
-      case "test_get_script": {
-        const p = testCasePath(args);
-        return textResult(await doGet(`${p}/script`));
-      }
-
-      case "test_replace_script": {
-        const p = testCasePath(args);
-        return textResult(await doPut(`${p}/script`, { script: args?.script }));
-      }
-
-      case "test_update_line": {
-        const p = testCasePath(args);
-        return textResult(await doPost(`${p}/script/update-line`, {
-          line_number: args?.line_number,
-          content: args?.content,
+      case "test_run":
+        return textResult(await doPost("/tests/cases/run", {
+          project_dir: args?.project_dir,
+          case_path: args?.case_path,
+          device_id: args?.device_id,
         }));
-      }
-
-      case "test_insert_after": {
-        const p = testCasePath(args);
-        return textResult(await doPost(`${p}/script/insert-after`, {
-          line_number: args?.line_number,
-          content: args?.content,
-        }));
-      }
-
-      case "test_delete_line": {
-        const p = testCasePath(args);
-        return textResult(await doPost(`${p}/script/delete-line`, {
-          line_number: args?.line_number,
-        }));
-      }
-
-      case "test_run": {
-        const p = testCasePath(args);
-        return textResult(await doPost(`${p}/run`, { device_id: args?.device_id }));
-      }
 
       default:
         return { content: [{ type: "text" as const, text: `Unknown tool: ${name}` }], isError: true };

@@ -24,10 +24,6 @@ export function getResourceContent(uri: string): string | null {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Resource content — copied verbatim from Go resources.go
-// ---------------------------------------------------------------------------
-
 const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
 <guide>
@@ -57,8 +53,8 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </ocr-fallback>
 
   <execution-modes>
-    Default (explore mode): non-last observe actions are skipped — only final observe executes. Use "mode": "deterministic" when you need every observe to execute (observe → act → observe → act → observe).
-    Example: {"version": "0.2", "mode": "deterministic", "steps": [{"action": "observe", "include": ["ui_tree"]}, {"action": "tap", "predicate": {"text": "Next"}}, {"action": "observe", "include": ["ui_tree"]}]}
+    Default (explore mode): only the last observe in a script runs — earlier observes are skipped. This is the right mode for the typical pattern: actions first, then one observe at the end to see the result. If a step fails, the error includes a debug UI tree so you don't need a separate observe.
+    Deterministic mode: every observe runs. Use only when you need to capture screen state between actions within a single script (rare — prefer separate execute_dsl calls so you can reason between steps).
   </execution-modes>
 
   <workflow>Observe screen → plan → act via execute_dsl → verify (end script with wait_for stable + observe) → repeat until done.</workflow>
@@ -66,6 +62,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   <screenshot-tools>
     get_screenshot — fast low-quality image for LLM visual analysis.
     save_screenshot — full-quality PNG for reporting, debugging, or sharing.
+    To verify animations and UI transitions, use record_start/record_stop.
   </screenshot-tools>
 
   <infinite-scrolling>To collect data from infinite-scrolling views (feeds, search results), scroll to load a batch first, then observe with only_visible:false to get all loaded items in one go.</infinite-scrolling>
@@ -82,14 +79,13 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   <target-element>{"predicate": Predicate}</target-element>
 
   <predicate context="native">
-    <note>Prefer text_contains or text_regex over text (exact match) — UI text often changes with state, locale, or dynamic content. Exact match breaks easily. Prefer text fields over label fields — text is what the user sees on screen and is more reliable.</note>
+    <note>Prefer text_contains or text_regex over text (exact match) — UI text often changes with state, locale, or dynamic content. Exact match breaks easily.</note>
     <field name="text" type="string">Exact match — use only when the full text is short, static, and unique</field>
     <field name="text_contains" type="string">Substring, case-insensitive — preferred for most matching</field>
     <field name="text_starts_with" type="string">Prefix match</field>
     <field name="text_regex" type="string">Regex pattern — use for dynamic text (numbers, dates, counts)</field>
     <field name="type" type="string">button, input, switch, text, image, cell, scrollview</field>
-    <field name="label" type="string">Accessibility label (exact) — use only when text fields are empty</field>
-    <field name="label_contains" type="string">Accessibility label (partial) — use only when text fields are empty</field>
+    <field name="accessibility_id" type="string">Exact match on the #id shown in UI tree (without the # prefix)</field>
     <field name="enabled" type="bool">Enabled state</field>
     <field name="visible" type="bool">Visible state</field>
     <field name="selected" type="bool">Selected state</field>
@@ -168,9 +164,10 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     Direction = semantic (where to look), not finger movement.
     <field name="direction" required="yes">down (look below), up (look above)</field>
     <field name="to_element" type="TargetElement"/>
-    <field name="max_scrolls" type="int"/>
+    <field name="max_scrolls" type="int" default="10"/>
     <field name="amount">small, page, full</field>
     <example>{"action": "scroll", "direction": "down", "to_element": {"predicate": {"text": "Privacy"}}, "max_scrolls": 10}</example>
+    <note>scroll with to_element returns "reached end of scrollable content" if the list ends before the element is found. If it returns "element not found after scrolling" instead, the list has more content — increase max_scrolls or call scroll again to continue searching.</note>
   </action>
 
   <action name="drag">
@@ -193,7 +190,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <action name="toggle">
     <field name="predicate" required="yes"/>
-    <field name="state" required="yes">on or off</field>
+    <field name="state" required="no">Desired state: "on" or "off". If omitted, always toggles. If set, skips when already correct.</field>
     <example>{"action": "toggle", "predicate": {"type": "switch", "text_contains": "Wi-Fi"}, "state": "on"}</example>
   </action>
 
@@ -345,6 +342,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   <action name="record_stop">
     <field name="file_path">Override output directory</field>
     <returns>recording_path, frame_count, transition_hints (anomalies: jump/flash/stutter/incoherent_motion with from_frame, to_frame, type, delta_percent, region, message)</returns>
+    <note>transition_hints contains anomalous frame pairs (from_frame, to_frame). If transition_hints is empty, do not read any frames. If not empty, read only the flagged frame pairs. Read additional frames only if strictly necessary to investigate a flagged anomaly.</note>
   </action>
 </screen-recording>
 
@@ -355,8 +353,15 @@ const TESTING_REF = `<testing-reference>
 
 <important>Read mobai://reference/device-automation to learn how to control devices before interacting with them.</important>
 
+<file-model>
+  Tests are .mob files on disk inside project directories. You work with them directly:
+  - Use test_list_projects to discover project directories and their .mob files
+  - Read .mob files directly from the project directory using filesystem tools
+  - Create, edit, rename, and delete .mob files directly — MobAI watches for changes and updates the UI live
+  - Use test_run to execute a test on a device — this is the only operation that requires MCP
+</file-model>
+
 <rules>
-  <rule>Test scripts are ONLY accessible via MCP test_* tools. There are NO .mob files on disk. Do NOT use grep, find, cat, or any filesystem commands to look for scripts.</rule>
   <rule>Never ask the user for information you can get yourself — use observe, list_apps, get_ui_tree.</rule>
   <rule>Always add wait_for before every element interaction (tap, type, toggle, long_press, double_tap, drag). Exception: the element was asserted on the immediately preceding line.</rule>
   <rule>Always use predicates over coordinates — predicates survive layout changes.</rule>
@@ -365,22 +370,21 @@ const TESTING_REF = `<testing-reference>
 </rules>
 
 <workflow-create>
-  1. Observe the current screen
-  2. Plan the test steps from the user's description
-  3. Execute each action via DSL — add wait_for before every element interaction
-  4. Assert after key actions — verify expected state with assert_exists/assert_not_exists
-  5. Output the full script using MCP test tools
-  6. Verify — run the full script end-to-end
-  7. Fix — if steps fail, observe the screen, fix the failing lines
-  8. Re-run to verify fixes (max 3 retry cycles)
+  1. Call test_list_projects to find the project directory and existing tests
+  2. Observe the current screen on the device
+  3. Plan the test steps from the user's description
+  4. Write the .mob file directly to the project directory
+  5. Run the test with test_run
+  6. Fix — if steps fail, read the error, observe the screen, edit the .mob file
+  7. Re-run to verify fixes (max 3 retry cycles)
 </workflow-create>
 
 <workflow-fix>
-  1. Read the current script
+  1. Read the .mob file from disk
   2. Analyze the error messages — they reference exact line numbers
-  3. Reproduce — run the failing line individually via DSL to observe device state
-  4. Fix — update, insert, or delete lines as needed
-  5. Verify — re-run the test
+  3. Reproduce — run a failing action via DSL to observe device state
+  4. Edit the .mob file directly
+  5. Re-run with test_run
 </workflow-fix>
 
 <error-fixes>
@@ -409,10 +413,9 @@ const TESTING_REF = `<testing-reference>
 
 <verification>
   Check before every response:
-  1. Did you use MCP tools for all script mutations? (bare .mob lines in text are silently ignored)
-  2. Does every element interaction have a wait_for on the preceding line?
-  3. Are predicates used instead of coordinates wherever possible?
-  4. Did you observe the screen before acting?
+  1. Does every element interaction have a wait_for on the preceding line?
+  2. Are predicates used instead of coordinates wherever possible?
+  3. Did you observe the screen before acting?
 </verification>
 
 <mob-script-syntax>
@@ -456,6 +459,14 @@ const TESTING_REF = `<testing-reference>
     delay 1000                          — wait N ms
     press_key home|back|enter           — hardware key
     navigate back|home                  — navigation shortcut
+    two_finger_tap "Map"                — two-finger tap
+    pinch "Map" scale:0.5               — pinch (scale <1 = zoom out, >1 = zoom in)
+    pinch "Photo" scale:2.0             — pinch to zoom in
+    hide_keyboard                       — dismiss keyboard
+    copy_text "Field"                   — copy text from element
+    paste_text "Field"                  — paste clipboard into element
+    set_location 40.7128,-74.0060       — simulate GPS location (lat,lon)
+    reset_location                      — stop location simulation
     observe                             — observe screen
     screenshot "path.png"               — take screenshot
   </actions>
