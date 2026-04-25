@@ -11,6 +11,12 @@ export const RESOURCES = [
     description: "Testing workflow, rules, error fixes, and .mob script syntax for test generation",
     mimeType: "text/plain",
   },
+  {
+    uri: "mobai://claude-code-preview",
+    name: "Claude Code Preview Setup",
+    description: "How to preview a MobAI device's control UI inside Claude Code's preview panel",
+    mimeType: "text/plain",
+  },
 ];
 
 export function getResourceContent(uri: string): string | null {
@@ -19,10 +25,44 @@ export function getResourceContent(uri: string): string | null {
       return DEVICE_AUTOMATION_REF;
     case "mobai://reference/testing":
       return TESTING_REF;
+    case "mobai://claude-code-preview":
+      return CLAUDE_CODE_PREVIEW;
     default:
       return null;
   }
 }
+
+const CLAUDE_CODE_PREVIEW = `<claude-code-preview>
+Prerequisite: the MobAI desktop app must be running. It owns the
+localhost 8787 web server the preview panel will render.
+
+1. Call list_devices and grab the device's id and controlUrl.
+
+2. Write .claude/launch.json at the project root (or, inside a git
+   worktree, at the worktree root):
+
+   {
+     "version": "0.0.1",
+     "configurations": [{
+       "name": "MobAI — <device name>",
+       "runtimeExecutable": "sleep",
+       "runtimeArgs": ["86400"],
+       "port": 8787,
+       "url": "<controlUrl>"
+     }]
+   }
+
+   - runtimeExecutable + runtimeArgs is a no-op lifetime anchor for
+     Claude Code's panel; the real server is MobAI.
+   - port is the localhost port Claude Code binds the preview to;
+     always 8787 for MobAI.
+   - url is the device-specific URL (controlUrl from step 1) that the
+     panel actually displays.
+
+3. Call the mcp__Claude_Preview__preview_start tool with the "name"
+   from the configuration above.
+</claude-code-preview>
+`;
 
 const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
@@ -58,6 +98,13 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </execution-modes>
 
   <workflow>Observe screen → plan → act via execute_dsl → verify (end script with wait_for stable + observe) → repeat until done.</workflow>
+
+  <per-app-skills>
+    Before working with a known app, check ~/.claude/skills/ for a skill matching its bundle id or name (e.g. com-instagram-android, uber) and load it — it may already encode selectors, flows, and quirks learned on a prior run.
+    When you discover app-specific gotchas that would cost future sessions time — unstable selectors that only work with a specific predicate, hidden taps, flows that need an extra wait_for, React Native / Flutter screens that need OCR, dialogs that hijack input — create or update a skill at ~/.claude/skills/&lt;app-slug&gt;/SKILL.md capturing the finding. Keep each skill short: the specific quirk, the selector/flow that works, and one sentence on why the obvious approach fails. Do not write generic mobile-automation advice there — that belongs in this reference.
+
+    Also save reusable multi-step flows as labeled mobai CLI command sequences inside the same SKILL.md. When you confirm a flow works (login, dismiss onboarding, open-settings-and-toggle-X, checkout), add a section with a heading like "## Flow: login" and a fenced shell code block of "mobai ..." commands in order — one per step. Mark variable inputs with placeholders (&lt;EMAIL&gt;, &lt;OTP_CODE&gt;) so future sessions know what to substitute. On next run, replay the commands (shell them out or translate to execute_dsl) with placeholders substituted — this avoids re-deriving the flow from scratch. Shell commands are saved (not JSON DSL) because the MobAI CLI does not execute DSL JSON blobs, and shell commands stay replayable from either CLI or MCP sessions. If a snippet breaks because the app changed, update it in place.
+  </per-app-skills>
 
   <screenshot-tools>
     get_screenshot — fast low-quality image for LLM visual analysis.
