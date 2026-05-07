@@ -33,15 +33,6 @@ function ensureScreenshotDir(): void {
   }
 }
 
-function saveBase64ToTemp(base64Data: string, prefix: string): string | null {
-  if (!base64Data || base64Data.length <= 200) return null;
-  ensureScreenshotDir();
-  const filename = `${prefix}_${Date.now()}.png`;
-  const filePath = path.join(SCREENSHOT_DIR, filename);
-  fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
-  return filePath;
-}
-
 function screenshotToFile(body: any): string {
   if (body?.path) {
     return `Screenshot saved to ${body.path}`;
@@ -57,30 +48,6 @@ function screenshotToFile(body: any): string {
     return `Screenshot saved to ${filePath}`;
   }
   return JSON.stringify(body, null, 2);
-}
-
-function extractDSLScreenshots(body: any): any {
-  if (!body?.step_results) return body;
-
-  for (const step of body.step_results) {
-    const native = step.result?.observations?.native;
-    if (native?.screenshot && typeof native.screenshot === "string" && native.screenshot.length > 200) {
-      const filePath = saveBase64ToTemp(native.screenshot, "observe");
-      if (filePath) {
-        native.screenshot = filePath;
-        native.screenshot_saved = true;
-      }
-    }
-
-    if (step.debug?.screenshot && typeof step.debug.screenshot === "string" && step.debug.screenshot.length > 200) {
-      const filePath = saveBase64ToTemp(step.debug.screenshot, "debug");
-      if (filePath) {
-        step.debug.screenshot = filePath;
-        step.debug.screenshot_saved = true;
-      }
-    }
-  }
-  return body;
 }
 
 // ---------------------------------------------------------------------------
@@ -153,6 +120,7 @@ const server = new Server(
     instructions: `MobAI controls Android and iOS devices. Before starting any device task, read the relevant MCP resources:
 - mobai://reference/device-automation — how to control devices (read before ANY device interaction)
 - mobai://reference/testing — .mob script syntax (read ONLY when user asks to create or fix test scripts)
+- mobai://reference/debugging — how to attach lldb, set breakpoints, inspect state (read before ANY debug_* tool)
 Check available skills in current work directory and load any relevant to the user's request.`,
   }
 );
@@ -305,15 +273,109 @@ Input: JSON string with "version": "0.2" and "steps" array. Example:
   },
   {
     name: "test_run",
-    description: "Run a .mob test case on a device. The case_path is relative to the project directory.",
+    description: "Run a .mob test case on a device. The case_path is relative to the project directory. Pass params to supply values for ${name} substitution in the script.",
     inputSchema: {
       type: "object" as const,
       properties: {
         project_dir: { type: "string", description: "Absolute path to the project directory" },
         case_path: { type: "string", description: "Relative path to the .mob file within the project, e.g. auth/login.mob" },
         device_id: { type: "string", description: "Device ID to run the test on" },
+        params: { type: "object", additionalProperties: { type: "string" }, description: "Optional key-value parameters for ${name} substitution in the script" },
       },
       required: ["project_dir", "case_path", "device_id"],
+    },
+  },
+  // Live app debugging via lldb-dap. iOS only. Read mobai://reference/debugging
+  // before using any of these.
+  {
+    name: "debug_attach",
+    description:
+      "Start a debug session for an iOS app. Provide either bundle_id (launches and attaches) or pid (attaches to a running process). Optional breakpoints[] are armed before the target resumes. Read mobai://reference/debugging first.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        bundle_id: { type: "string", description: "App bundle ID to launch and attach. Either this or pid is required." },
+        pid: { type: "number", description: "Attach to an already-running PID. Either this or bundle_id is required." },
+        breakpoints: {
+          type: "array",
+          items: { type: "string" },
+          description: `Initial breakpoint specs. "File.swift:42" (preferred), "Module.Type.method" (no parameter signature), "-[Class method:]", or runtime symbol.`,
+        },
+        stop_on_entry: { type: "boolean", description: "Simulator only — pause at first instruction." },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
+    name: "debug_state",
+    description:
+      "Query the current debug session. Returns {state, breakpoints} by default. Set include_stack=true to also fetch the stack of the stopped thread; include_vars=true to also fetch frame[0] locals; include_threads=true to enumerate all threads.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        include_stack: { type: "boolean", description: "Include stack of stopped thread." },
+        include_vars: { type: "boolean", description: "Include frame[0] locals." },
+        include_threads: { type: "boolean", description: "Include all threads." },
+      },
+      required: ["device_id"],
+    },
+  },
+  {
+    name: "debug_breakpoint",
+    description:
+      "Add or remove a breakpoint in the active debug session. For action=add provide spec; for action=remove provide id.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        action: { type: "string", enum: ["add", "remove"], description: `"add" or "remove"` },
+        spec: { type: "string", description: `Breakpoint spec for action=add. "File.swift:42", "Module.Type.method", "-[Class method:]", or runtime symbol.` },
+        id: { type: "number", description: "Breakpoint id for action=remove." },
+      },
+      required: ["device_id", "action"],
+    },
+  },
+  {
+    name: "debug_eval",
+    description:
+      `Evaluate a Swift/ObjC expression at the current pause. Session must be paused. Examples: "p defaultPrivate", "po self.viewModel.user.email", "frame variable".`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        expression: { type: "string", description: "Expression to evaluate" },
+        frame_id: { type: "number", description: "Optional frame id to evaluate in" },
+      },
+      required: ["device_id", "expression"],
+    },
+  },
+  {
+    name: "debug_step",
+    description:
+      `Advance the target.\n  "in" — step into next call (blocks ~ms, returns {state, breakpoints, stack, frame0_locals})\n  "over" — step over next call (same shape)\n  "out" — run until current frame returns (same shape)\n  "continue" — resume until next breakpoint (fire-and-forget; returns just {state, breakpoints} — poll debug_state for next stop)`,
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        direction: { type: "string", enum: ["in", "over", "out", "continue"], description: `"in" | "over" | "out" | "continue"` },
+        include_stack: { type: "boolean", description: `Include the new stack. Default true. Ignored for direction="continue".` },
+        include_vars: { type: "boolean", description: `Include the new frame[0] locals. Default true. Ignored for direction="continue".` },
+      },
+      required: ["device_id", "direction"],
+    },
+  },
+  {
+    name: "debug_detach",
+    description: "End the debug session. Pass kill=true to terminate the debuggee; otherwise it keeps running.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        kill: { type: "boolean", description: "Terminate debuggee on detach." },
+      },
+      required: ["device_id"],
     },
   },
 ];
@@ -390,7 +452,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           throw new Error("invalid DSL JSON: " + commandsStr);
         }
         const body = await doPost(`/devices/${args?.device_id}/dsl/execute`, script);
-        return textResult(extractDSLScreenshots(body));
+        return textResult(body);
       }
 
       // Test management
@@ -400,12 +462,105 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "test_list_projects":
         return textResult(await doGet("/tests/projects"));
 
-      case "test_run":
-        return textResult(await doPost("/tests/cases/run", {
+      case "test_run": {
+        const body: any = {
           project_dir: args?.project_dir,
           case_path: args?.case_path,
           device_id: args?.device_id,
-        }));
+        };
+        const rawParams = args?.params;
+        if (rawParams && typeof rawParams === "object") {
+          const params: Record<string, string> = {};
+          for (const [k, v] of Object.entries(rawParams as Record<string, unknown>)) {
+            params[k] = String(v);
+          }
+          body.params = params;
+        }
+        return textResult(await doPost("/tests/cases/run", body));
+      }
+
+      // Debug session
+      case "debug_attach": {
+        const dev = args?.device_id as string;
+        const bundleID = args?.bundle_id as string | undefined;
+        const pid = args?.pid as number | undefined;
+        if (!bundleID && !pid) throw new Error("either bundle_id or pid is required");
+        const body: any = {};
+        if (Array.isArray(args?.breakpoints)) body.breakpoints = args!.breakpoints;
+        if (args?.stop_on_entry) body.stopOnEntry = true;
+        let path: string;
+        if (pid && pid > 0) {
+          body.pid = pid;
+          path = `/devices/${dev}/debug-session/attach-running`;
+        } else {
+          body.bundleId = bundleID;
+          path = `/devices/${dev}/debug-session/attach`;
+        }
+        return textResult(await doPost(path, body));
+      }
+
+      case "debug_detach": {
+        const dev = args?.device_id as string;
+        const body: any = args?.kill ? { kill: true } : {};
+        return textResult(await doRequest("DELETE", `/devices/${dev}/debug-session`, body));
+      }
+
+      case "debug_state": {
+        const dev = args?.device_id as string;
+        const includeStack = args?.include_stack === true;
+        const includeVars = args?.include_vars === true;
+        const includeThreads = args?.include_threads === true;
+        const base = `/devices/${dev}/debug-session`;
+        const snap: any = await doGet(base);
+        if (snap?.state === "paused") {
+          if (includeThreads) {
+            const t: any = await doGet(`${base}/threads`);
+            snap.threads = t?.threads;
+          }
+          if (includeStack || includeVars) {
+            const stack: any = await doGet(`${base}/stack`);
+            if (includeStack) snap.stack = stack?.frames;
+            if (includeVars && Array.isArray(stack?.frames) && stack.frames.length > 0) {
+              const frameID = stack.frames[0].id;
+              const vars: any = await doGet(`${base}/frames/${frameID}/variables`);
+              snap.frame0_locals = vars?.scopes;
+            }
+          }
+        }
+        return textResult(snap);
+      }
+
+      case "debug_breakpoint": {
+        const dev = args?.device_id as string;
+        const action = args?.action as string;
+        if (action === "add") {
+          const spec = args?.spec as string;
+          if (!spec) throw new Error("spec is required for action=add");
+          return textResult(await doPost(`/devices/${dev}/debug-session/breakpoints`, { spec }));
+        } else if (action === "remove") {
+          const id = args?.id as number;
+          if (!id || id <= 0) throw new Error("id is required for action=remove");
+          return textResult(await doDelete(`/devices/${dev}/debug-session/breakpoints/${id}`));
+        }
+        throw new Error(`action must be "add" or "remove"`);
+      }
+
+      case "debug_eval": {
+        const dev = args?.device_id as string;
+        const body: any = { expression: args?.expression };
+        if (args?.frame_id) body.frameId = args.frame_id;
+        return textResult(await doPost(`/devices/${dev}/debug-session/eval`, body));
+      }
+
+      case "debug_step": {
+        const dev = args?.device_id as string;
+        const direction = args?.direction as string;
+        if (!direction) throw new Error(`direction is required ("in" | "over" | "out")`);
+        const body: any = { direction };
+        if (typeof args?.include_stack === "boolean") body.includeStack = args.include_stack;
+        if (typeof args?.include_vars === "boolean") body.includeVars = args.include_vars;
+        return textResult(await doPost(`/devices/${dev}/debug-session/step`, body));
+      }
 
       default:
         return { content: [{ type: "text" as const, text: `Unknown tool: ${name}` }], isError: true };

@@ -6,12 +6,12 @@
     "url": "https://github.com/MobAI-App/mobai-mcp",
     "source": "github"
   },
-  "version": "2.2.0",
+  "version": "2.2.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mobai-mcp",
-      "version": "2.2.0",
+      "version": "2.2.1",
       "transport": {
         "type": "stdio"
       }

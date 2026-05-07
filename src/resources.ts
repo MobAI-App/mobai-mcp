@@ -17,6 +17,12 @@ export const RESOURCES = [
     description: "How to preview a MobAI device's control UI inside Claude Code's preview panel",
     mimeType: "text/plain",
   },
+  {
+    uri: "mobai://reference/debugging",
+    name: "App Debugging Reference",
+    description: "How to attach lldb, set breakpoints, inspect stack/variables, evaluate Swift/ObjC expressions — read before any debug_* tool",
+    mimeType: "text/plain",
+  },
 ];
 
 export function getResourceContent(uri: string): string | null {
@@ -27,6 +33,8 @@ export function getResourceContent(uri: string): string | null {
       return TESTING_REF;
     case "mobai://claude-code-preview":
       return CLAUDE_CODE_PREVIEW;
+    case "mobai://reference/debugging":
+      return DEBUGGING_REF;
     default:
       return null;
   }
@@ -72,6 +80,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   <script-format>
     {"version": "0.2", "steps": [...actions...], "on_fail": {"strategy": "retry", "max_retries": 2}}
     Every script must include "version": "0.2" and a "steps" array.
+    Optional "params": {"name": "default_value"} declares parameters. Callers supply values via the API; \${name} is substituted in step string fields at runtime.
   </script-format>
 
   <important>
@@ -98,6 +107,14 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </execution-modes>
 
   <workflow>Observe screen → plan → act via execute_dsl → verify (end script with wait_for stable + observe) → repeat until done.</workflow>
+
+  <siri-shortcuts>
+    iOS only. Before navigating through multiple screens to reach a feature, check if Siri can take you there directly. Many apps register SiriKit intents and App Shortcuts — a single siri action can replace 5-10 tap/scroll/wait steps.
+    Use observe with include: installed_apps to check what an app exposes. Common shortcuts: play media, send messages, open specific screens, make payments, start workouts, get directions.
+    Examples: "Open my cart in Amazon", "Play my playlist on Spotify", "Show my reservations in Booking", "Search YouTube for cats".
+    If Siri asks a follow-up question, dismiss and re-invoke with a more specific prompt that includes the missing detail.
+    Always prefer siri over manual UI navigation when the app supports it — it is faster, more reliable, and survives UI redesigns.
+  </siri-shortcuts>
 
   <per-app-skills>
     Before working with a known app, check ~/.claude/skills/ for a skill matching its bundle id or name (e.g. com-instagram-android, uber) and load it — it may already encode selectors, flows, and quirks learned on a prior run.
@@ -301,6 +318,16 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <action name="reset_location">
     <example>{"action": "reset_location"}</example>
+  </action>
+
+  <action name="siri">
+    iOS only. Sends a voice command to Siri via XCUISiriService. Auto-approves consent dialogs, captures Siri's response text, then dismisses the Siri UI.
+    Use for triggering SiriKit intents and App Shortcuts registered by apps (media playback, messaging, banking shortcuts, etc.).
+    The captured response is stored in "siri_response" and returned in the step result. If Siri asks a follow-up question, reformulate the prompt with more detail and call siri again.
+    <field name="prompt" required="yes">Voice command text</field>
+    <example>{"action": "siri", "prompt": "Search YouTube for cat videos"}</example>
+    <example>{"action": "siri", "prompt": "Send an email to john@example.com via Gmail"}</example>
+    <note>Check the app's siri field in the installed apps list (observe with include: installed_apps) to see which intents and activities it supports before calling siri.</note>
   </action>
 </native-actions>
 
@@ -514,6 +541,7 @@ const TESTING_REF = `<testing-reference>
     paste_text "Field"                  — paste clipboard into element
     set_location 40.7128,-74.0060       — simulate GPS location (lat,lon)
     reset_location                      — stop location simulation
+    siri "Search YouTube for cats"      — invoke Siri with voice command (iOS only)
     observe                             — observe screen
     screenshot "path.png"               — take screenshot
   </actions>
@@ -537,7 +565,29 @@ const TESTING_REF = `<testing-reference>
     # Device: iPhone 15                 — device filter
     # Timeout: 30000                    — global timeout (ms)
     # On-Fail: abort                    — abort or continue
+    # Param: username                   — declare a parameter (no default)
+    # Param: timeout = 5000             — declare with default value
   </metadata>
+
+  <variables>
+    \${name} substitution: use \${param_name} anywhere in a step line to reference a parameter or extracted value.
+    Parameters declared via # Param: are available as \${name}. Extracted values (see extract below) are also available.
+    Example:
+      # Param: email
+      # Param: password = secret123
+      type "Email" → "\${email}"
+      type "Password" → "\${password}"
+  </variables>
+
+  <extract>
+    extract key from "Element"           — extract text from matched element into \${key}
+    extract key from #AccessibilityID    — extract text by accessibility ID
+    extract key from ~"partial" regex:"(\\d+)" — extract with regex capture group
+    extract key screenshot               — save screenshot to disk, store path in \${key}
+    extract key = "literal value"        — store a literal string in \${key}
+    Extracted values are available as \${key} in subsequent steps and returned in the API response as "extracted" map.
+    The optional regex: modifier applies a regex to the matched text; if it has a capture group, group 1 is stored.
+  </extract>
 
   <platform-blocks>
     # ios / # android                   — open platform block
@@ -555,5 +605,122 @@ const TESTING_REF = `<testing-reference>
   </conditionals>
 </mob-script-syntax>
 
+<apis>
+  Mobile apps can be turned into callable APIs by saving parameterized .mob scripts to the APIs directory.
+
+  <directory>{MOBAI_DATA_DIR}/apis/ — global directory for API scripts. Each .mob file is a named API. Subdirectories are supported and become slash-separated names (e.g. apis/youtube/search.mob is callable as "youtube/search"). Resolves to ~/Library/Application Support/mobai/data/apis on macOS, %AppData%/mobai/data/apis on Windows, ~/.config/mobai/data/apis on Linux.</directory>
+
+  <workflow-create-api>
+    When the user asks to create an API from a mobile app flow:
+    1. Observe the app and understand the flow
+    2. Write a .mob script with # Param: declarations for inputs and extract actions for outputs
+    3. Save it to {MOBAI_DATA_DIR}/apis/{name}.mob — flat (gmail-send.mob) or nested (gmail/send.mob)
+    4. Test it with test_run using project_dir: {MOBAI_DATA_DIR}/apis/ and case_path: {name}.mob
+    5. List available APIs:    GET  /api/v1/apis
+       Call an API:            POST /api/v1/apis/run/{name}  with {"device_id": "...", "params": {...}}
+       The {name} segment is the path inside apis/ minus the .mob extension.
+       API runs do not persist results to .mobai/runs/ — only the extracted values come back in the response.
+  </workflow-create-api>
+
+  <example-api>
+    # Search YouTube
+    # Param: query
+    siri "Search YouTube for \${query}"
+    wait_for ~"\${query}" timeout:5000
+    extract result from ~"\${query}"
+
+    POST /api/v1/apis/run/youtube-search {"device_id":"X","params":{"query":"cats"}}
+    → {"result": "cats"}
+  </example-api>
+</apis>
+
 </testing-reference>
+`;
+
+const DEBUGGING_REF = `<debugging-reference>
+
+<scope>
+  Live debugging of an iOS app running on a connected device or booted simulator. Attach lldb, set breakpoints, inspect stack and variables, evaluate Swift/ObjC expressions, continue. Six MCP tools cover the full workflow.
+
+  Requires: a debug-signed build of the app (debug provisioning profile with get-task-allow). App Store / TestFlight builds cannot be attached. iOS 17+ for physical devices. macOS host with Xcode installed.
+</scope>
+
+<workflow>
+  Bps fire asynchronously when the user (or your execute_dsl) drives the UI. The agent observes via debug_state, not by waiting on debug_continue.
+
+    1. debug_attach {device_id, bundle_id, breakpoints: ["File.swift:42"]}
+    2. (trigger the action — usually via execute_dsl)
+    3. debug_state {device_id, include_stack: true, include_vars: true}   // poll until state == "paused"
+    4. debug_eval {device_id, expression: "po self.viewModel.user"}
+    5. debug_step {device_id, direction: "continue"}                        // resume; fire-and-forget
+    6. (loop 2-5 as needed)
+    7. debug_detach {device_id}
+
+  direction: "continue" is fire-and-forget. For deterministic line-stepping use "in" / "over" / "out" — those block (~ms) and return fresh stack + locals.
+</workflow>
+
+<tools>
+  debug_attach — start a debug session.
+    device_id (required), bundle_id OR pid (one required), breakpoints (optional [string]),
+    stop_on_entry (optional bool, simulator only).
+
+  debug_state — query the current session state.
+    device_id (required), include_stack (bool, default false), include_vars (bool, default false), include_threads (bool, default false).
+    Default returns just {state, breakpoints}. Stack, frame[0] locals, and the thread list are opt-in (each costs a round-trip; ~few seconds on physical hardware).
+
+  debug_breakpoint — add or remove a breakpoint.
+    device_id, action: "add" | "remove", spec (for add), id (for remove).
+
+  debug_eval — evaluate a Swift/ObjC expression at the current pause.
+    device_id, expression, frame_id (optional). Session must be paused.
+
+  debug_step — advance the target.
+    device_id, direction one of:
+      "in" / "over" / "out" — block ~ms until next stop; return {state, breakpoints, stack, frame0_locals}.
+      "continue"            — fire-and-forget; return {state, breakpoints}; poll debug_state for next stop.
+    include_stack / include_vars (default true; ignored for "continue").
+
+  debug_detach — end the session. kill (default false) terminates the debuggee.
+</tools>
+
+<breakpoint-specs>
+  Three accepted forms. Prefer file:line for application code.
+
+    "File.swift:42"             file:line (basename or absolute path)
+    "Module.Type.method"        Swift demangled prefix (NO parameter signature, NO return type)
+    "-[ClassName method:]"      ObjC method
+    "swift_willThrow"           bare runtime symbol
+
+  Caveats:
+    - Release/optimized builds without DWARF return verified=false.
+    - swift_willThrow / objc_exception_throw fire on EVERY internal Swift/ObjC throw — Apple frameworks throw constantly under the hood. Use only when actually hunting an uncaught error.
+</breakpoint-specs>
+
+<eval-expressions>
+  debug_eval runs lldb expression --. Accepts ObjC++ syntax by default; Swift syntax when frame is in a Swift compile unit.
+
+    p expr            evaluate, default-format
+    po expr           call objects description
+    frame variable    list all locals (no eval — fast)
+    bt                full backtrace
+    image lookup -n NAME   resolve a symbol name to module + addresses
+</eval-expressions>
+
+<state-machine>
+  paused — debug_eval works; debug_continue resumes.
+  running — debug_eval returns 409; debug_breakpoint still works for next hit.
+  dead — exited or crashed. Detach and reattach.
+
+  While the foreground app on a device is paused at a bp, UI input via execute_dsl tap/swipe blocks at WDA until you debug_continue.
+</state-machine>
+
+<common-failures>
+  "lldb-dap not found" — install Xcode 15+.
+  "device debugging requires iOS 17+" — physical-device path needs the on-device tunnel.
+  "bundle is not installed on device" — install_app first with a debug-signed build.
+  verified=false — symbol mangling mismatch or no debug info. Try image lookup -n NAME via debug_eval.
+  "___lldb_unnamed_symbol_*" in stacks — dSYM not loaded. For device builds, run debug_eval "target symbols add /path/to/MyApp.app.dSYM".
+</common-failures>
+
+</debugging-reference>
 `;

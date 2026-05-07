@@ -107,7 +107,7 @@ Tests are `.mob` files on disk inside project directories. You read, write, and 
 |---|---|
 | `test_get_active` | Get the active test project directory and its `.mob` cases |
 | `test_list_projects` | List all known test project directories with their `.mob` cases |
-| `test_run` | Run a `.mob` test case on a device (`project_dir` + `case_path` + `device_id`) |
+| `test_run` | Run a `.mob` test case on a device (`project_dir` + `case_path` + `device_id`, optional `params` for `${name}` substitution) |
 
 ## Resources
 
