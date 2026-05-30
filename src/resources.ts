@@ -239,9 +239,11 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="from_coords" type="Coordinates" required="one-of"/>
     <field name="to_element" type="TargetElement" required="one-of"/>
     <field name="to_coords" type="Coordinates" required="one-of"/>
-    <field name="duration_ms" type="int"/>
-    <field name="press_duration_ms" type="int">Press-and-hold before drag (for moving app icons)</field>
+    <field name="duration_ms" type="int">Drag motion duration (default 500)</field>
+    <field name="press_duration_ms" type="int">Hold before moving (for moving app icons, picking up list items)</field>
+    <field name="hold_duration_ms" type="int">Hold at destination before release (useful for iOS drop zones that need a dwell)</field>
     <example>{"action": "drag", "from": {"predicate": {"text": "Item"}}, "to_element": {"predicate": {"text": "Trash"}}}</example>
+    <example>{"action": "drag", "from": {"predicate": {"text": "App"}}, "to_element": {"predicate": {"text": "Folder"}}, "press_duration_ms": 500, "hold_duration_ms": 200}</example>
   </action>
 
   <action name="press_key">
@@ -527,7 +529,7 @@ const TESTING_REF = `<testing-reference>
     toggle type:switch near "Wi-Fi" on  — modifier-only
     drag "Item" to "Trash"             — drag element
     drag 100,200 to 300,400 duration:500 — coordinate drag
-    drag "App" to "Folder" press_duration:500 — press-and-drag
+    drag "App" to "Folder" press_duration:500 hold_duration:200 — press-hold-move-hold-release
     wait_for "Element" timeout:5000     — wait for element
     wait_for type:button bounds:bottom_half timeout:3000 — modifier-only
     delay 1000                          — wait N ms
@@ -603,6 +605,14 @@ const TESTING_REF = `<testing-reference>
         tap "Other"
     }
   </conditionals>
+
+  <run-includes>
+    run "./path/to/other.mob"            — inline another .mob file at compile time
+    run "./auth/login.mob" email="x@y" password="hunter2" — pass args; values overlay the target file's # Param: defaults
+    run "/abs/path/to/file.mob"          — absolute path is allowed
+    run "~/shared/login.mob"             — ~ expands to the user home directory
+    Path is relative to the calling file's directory unless absolute. Args use key=value (no colon, no quotes around the key). Values may contain \${name} references that resolve from the caller's scope at execute time. The target file's extracts flow back into the caller's scope (flat namespace).
+  </run-includes>
 </mob-script-syntax>
 
 <apis>

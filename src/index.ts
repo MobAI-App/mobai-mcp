@@ -389,6 +389,25 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Resources (reference docs)
+// ---------------------------------------------------------------------------
+
+server.setRequestHandler(ListResourcesRequestSchema, async () => {
+  return { resources: RESOURCES };
+});
+
+server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+  const { uri } = request.params;
+  const text = getResourceContent(uri);
+  if (text == null) {
+    throw new Error(`Unknown resource: ${uri}`);
+  }
+  return {
+    contents: [{ uri, mimeType: "text/plain", text }],
+  };
+});
+
+// ---------------------------------------------------------------------------
 // Tool call handler
 // ---------------------------------------------------------------------------
 
