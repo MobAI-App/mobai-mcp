@@ -126,7 +126,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   <screenshot-tools>
     get_screenshot — fast low-quality image for LLM visual analysis.
     save_screenshot — full-quality PNG for reporting, debugging, or sharing.
-    To verify animations and UI transitions, use record_start/record_stop.
+    A screenshot is a single settled frame — it cannot capture motion. Anything transient (animations, transitions, loading spinners; a screen transition is often only ~300ms) will be missed or caught mid-frame. To verify transitional behavior, use record_start/record_stop, which samples continuously and flags suspicious frames.
   </screenshot-tools>
 
   <infinite-scrolling>To collect data from infinite-scrolling views (feeds, search results), scroll to load a batch first, then observe with only_visible:false to get all loaded items in one go.</infinite-scrolling>
@@ -135,6 +135,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     Element not visible — use scroll with to_element to find it.
     App launches and page transitions take time — use wait_for or delay.
     Observe before acting on unfamiliar screens.
+    NO_MATCH / failed assert_exists: if the element exists off-screen, the error lists it under "candidates" — scroll to bring it into view (off-screen elements cannot be tapped). Empty candidates means it is genuinely absent or not yet rendered.
   </troubleshooting>
 </guide>
 
@@ -148,6 +149,8 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="text_contains" type="string">Substring, case-insensitive — preferred for most matching</field>
     <field name="text_starts_with" type="string">Prefix match</field>
     <field name="text_regex" type="string">Regex pattern — use for dynamic text (numbers, dates, counts)</field>
+    <field name="value" type="string">Exact match on the element's entered/current value (not its label/placeholder). Use to verify what was typed into a field — text matching sees the placeholder, value sees the content. Shown as content="..." in the UI tree. Secure fields are masked, so only length/non-empty is meaningful.</field>
+    <field name="value_contains" type="string">Substring match (case-insensitive) on the entered/current value</field>
     <field name="type" type="string">button, input, switch, text, image, cell, scrollview</field>
     <field name="accessibility_id" type="string">Exact match on the #id shown in UI tree (without the # prefix)</field>
     <field name="enabled" type="bool">Enabled state</field>
@@ -176,8 +179,11 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <action name="open_app">
     <field name="bundle_id" required="yes"/>
+    <field name="fresh" type="bool">Kill the app before launching to ensure a clean start from the home screen. Use when the app may have been left on an arbitrary screen from a previous run.</field>
+    <field name="debug" type="bool">ONLY for debug-built apps (e.g. Flutter dev builds, Xcode debug builds) that need a debugger attached to run. Attaches debugserver, streams stdout/stderr to a log file; result has log_path. Do NOT use for release/App Store apps — they launch fine with debug: false.</field>
     <example>{"action": "open_app", "bundle_id": "com.apple.Preferences"}</example>
-    <note>If open_app fails or the app disappears immediately after launch, the app has likely crashed. Do NOT retry or try alternative launch methods — start crash investigation instead. Use metrics_start with capture_logs: true to capture device logs, then diagnose.</note>
+    <example>{"action": "open_app", "bundle_id": "com.apple.Preferences", "fresh": true}</example>
+    <note>If open_app fails or the app disappears immediately after launch, the app has likely crashed. Do NOT retry or try alternative launch methods — start crash investigation instead. Use debug: true (or metrics_start with capture_logs: true) to capture device logs, then diagnose.</note>
   </action>
 
   <action name="tap">
@@ -214,6 +220,12 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <example>{"action": "type", "text": "Hello", "predicate": {"type": "input"}, "clear_first": true}</example>
   </action>
 
+  <action name="clear">
+    Clear a field's text without typing. With a predicate, focuses that field first; without one, clears the currently focused field.
+    <field name="predicate">Optional target element</field>
+    <example>{"action": "clear", "predicate": {"type": "input"}}</example>
+  </action>
+
   <action name="swipe">
     Direction = finger movement. Use direction OR from_coords/to_coords.
     <field name="direction">up, down, left, right</field>
@@ -244,6 +256,12 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="hold_duration_ms" type="int">Hold at destination before release (useful for iOS drop zones that need a dwell)</field>
     <example>{"action": "drag", "from": {"predicate": {"text": "Item"}}, "to_element": {"predicate": {"text": "Trash"}}}</example>
     <example>{"action": "drag", "from": {"predicate": {"text": "App"}}, "to_element": {"predicate": {"text": "Folder"}}, "press_duration_ms": 500, "hold_duration_ms": 200}</example>
+  </action>
+
+  <action name="drag_path">
+    <field name="points" type="array of {x, y, duration_ms}" required="true">Single-finger drag along a multi-point path. Each point's duration_ms is the time to move to it from the previous point. The first point is the touch-down location and its duration_ms is an optional initial press-hold (omit or 0 for none). Needs at least 2 points; every point after the first must have duration_ms > 0. Use this (not drag) for swipe-path gestures like unlock patterns, freeform draws, or curved scrolls.</field>
+    <example>{"action": "drag_path", "points": [{"x": 100, "y": 400}, {"x": 150, "y": 300, "duration_ms": 150}, {"x": 300, "y": 500, "duration_ms": 300}]}</example>
+    <example>{"action": "drag_path", "points": [{"x": 100, "y": 400, "duration_ms": 200}, {"x": 300, "y": 400, "duration_ms": 250}]}</example>
   </action>
 
   <action name="press_key">
@@ -323,7 +341,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </action>
 
   <action name="siri">
-    iOS only. Sends a voice command to Siri via XCUISiriService. Auto-approves consent dialogs, captures Siri's response text, then dismisses the Siri UI.
+    iOS only. Sends a voice command to Siri service on iOS devices. Auto-approves consent dialogs, captures Siri's response text, then dismisses the Siri UI.
     Use for triggering SiriKit intents and App Shortcuts registered by apps (media playback, messaging, banking shortcuts, etc.).
     The captured response is stored in "siri_response" and returned in the step result. If Siri asks a follow-up question, reformulate the prompt with more detail and call siri again.
     <field name="prompt" required="yes">Voice command text</field>
@@ -385,6 +403,15 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="threshold_percent" type="int"/>
     <example>{"action": "assert_screen_changed", "threshold_percent": 15}</example>
     <note>Pattern: observe(screenshot) then action then delay then assert_screen_changed. Do NOT observe after the action — it resets the baseline.</note>
+  </action>
+
+  <action name="ai_assert">
+    <field name="assert_prompt" required="yes"/>
+    <field name="include" type="[]string" note="opt-in extra context: screenshot, ocr (iOS). UI tree + the source script are always included."/>
+    <field name="timeout_ms" type="int" note="bounds the verdict (LLM/CLI reply), excluding context gathering. Default 60000."/>
+    <field name="message" note="prefixes the failure reason"/>
+    <example>{"action": "ai_assert", "assert_prompt": "the reply answers the user's question and is not an error", "include": ["screenshot"]}</example>
+    <note>Judges a natural-language assertion with the user's configured agent — either an LLM API provider (direct call) or Claude Code (spawned, reports back via report_assertion). Use for non-deterministic content (AI/LLM output, dynamic feeds) where exact-match assertions don't work. Treat as a soft assertion — it is non-deterministic.</note>
   </action>
 </assertions>
 
@@ -499,6 +526,7 @@ const TESTING_REF = `<testing-reference>
 
   <actions>
     app "com.example.app"              — launch app
+    app "com.example.app" fresh        — kill + launch for clean state
     kill_app "com.example.app"         — force-close app
     tap "Text"                          — tap by text
     tap "Field" near "Label"            — tap near another element
@@ -530,6 +558,7 @@ const TESTING_REF = `<testing-reference>
     drag "Item" to "Trash"             — drag element
     drag 100,200 to 300,400 duration:500 — coordinate drag
     drag "App" to "Folder" press_duration:500 hold_duration:200 — press-hold-move-hold-release
+    drag_path 100,400 150,300:150 300,500:300 - multi-point path (X,Y:moveMs, first point's :ms = optional press-hold)
     wait_for "Element" timeout:5000     — wait for element
     wait_for type:button bounds:bottom_half timeout:3000 — modifier-only
     delay 1000                          — wait N ms
@@ -552,6 +581,8 @@ const TESTING_REF = `<testing-reference>
     assert_exists "Element"             — element is on screen
     assert_not_exists "Element"         — element is NOT on screen
     assert_exists "Header" bounds:top_right — with region filter
+    assert_exists value:"hello"         — assert a field's entered value (exact); sees typed content, not placeholder
+    assert_exists value_contains:"@mail" — assert a substring of the entered value
     assert_count "Cell" expected:5      — element count
     checkpoint "name"                   — mark checkpoint
   </assertions>
@@ -624,9 +655,10 @@ const TESTING_REF = `<testing-reference>
     When the user asks to create an API from a mobile app flow:
     1. Observe the app and understand the flow
     2. Write a .mob script with # Param: declarations for inputs and extract actions for outputs
-    3. Save it to {MOBAI_DATA_DIR}/apis/{name}.mob — flat (gmail-send.mob) or nested (gmail/send.mob)
-    4. Test it with test_run using project_dir: {MOBAI_DATA_DIR}/apis/ and case_path: {name}.mob
-    5. List available APIs:    GET  /api/v1/apis
+    3. Use app "bundle.id" fresh to ensure a clean start — the app may be left on any screen from a previous call
+    4. Save it to {MOBAI_DATA_DIR}/apis/{name}.mob — flat (gmail-send.mob) or nested (gmail/send.mob)
+    5. Test it with test_run using project_dir: {MOBAI_DATA_DIR}/apis/ and case_path: {name}.mob
+    6. List available APIs:    GET  /api/v1/apis
        Call an API:            POST /api/v1/apis/run/{name}  with {"device_id": "...", "params": {...}}
        The {name} segment is the path inside apis/ minus the .mob extension.
        API runs do not persist results to .mobai/runs/ — only the extracted values come back in the response.

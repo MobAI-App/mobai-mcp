@@ -22,6 +22,29 @@ import { RESOURCES, getResourceContent } from "./resources.js";
 const API_BASE_URL = "http://127.0.0.1:8686/api/v1";
 const DEFAULT_TIMEOUT_MS = 300000; // 5 minutes (matches Go httpClient timeout)
 const SCREENSHOT_DIR = path.join(os.tmpdir(), "mobai", "screenshots");
+const DOWNLOAD_URL = "https://mobai.run/download";
+
+// Message shown when the MobAI desktop app is not reachable at its local API.
+const APP_NOT_RUNNING_MESSAGE =
+  `Could not reach the MobAI desktop app at 127.0.0.1:8686. ` +
+  `Make sure the MobAI desktop app is installed and running, then try again. ` +
+  `If you don't have it yet, download and install it from ${DOWNLOAD_URL}.`;
+
+/**
+ * Detects the "connection refused" / "could not connect" family of errors that
+ * Node's fetch throws when nothing is listening on the MobAI API port. These
+ * surface as a TypeError ("fetch failed") whose `cause` carries an errno code
+ * such as ECONNREFUSED / ENOTFOUND / ECONNRESET.
+ */
+function isConnectionError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const codes = ["ECONNREFUSED", "ENOTFOUND", "ECONNRESET", "EHOSTUNREACH", "ETIMEDOUT"];
+  const cause = (err as any).cause;
+  const causeCode = cause && typeof cause === "object" ? cause.code : undefined;
+  if (typeof causeCode === "string" && codes.includes(causeCode)) return true;
+  // Fallback: undici reports a bare "fetch failed" TypeError for these.
+  return err.name === "TypeError" && /fetch failed/i.test(err.message);
+}
 
 // ---------------------------------------------------------------------------
 // Screenshot helpers
@@ -73,7 +96,15 @@ async function doRequest(
     if (payload !== undefined && ["POST", "PUT", "PATCH"].includes(method)) {
       opts.body = typeof payload === "string" ? payload : JSON.stringify(payload);
     }
-    const response = await fetch(url, opts);
+    let response: Response;
+    try {
+      response = await fetch(url, opts);
+    } catch (err) {
+      if (isConnectionError(err)) {
+        throw new Error(APP_NOT_RUNNING_MESSAGE);
+      }
+      throw err;
+    }
     clearTimeout(timeoutId);
     const text = await response.text();
     let body: any;

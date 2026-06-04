@@ -140,7 +140,7 @@ Pass this as the `commands` argument (a JSON string) to `execute_dsl` along with
 
 ## Troubleshooting
 
-**"Connection refused"** — Make sure the MobAI desktop app is running and the API is reachable at `http://127.0.0.1:8686`.
+**"Connection refused" / "Could not reach the MobAI desktop app"** — Make sure the MobAI desktop app is installed and running, and the API is reachable at `http://127.0.0.1:8686`. If you don't have it yet, download and install it from [https://mobai.run/download](https://mobai.run/download).
 
 **"Bridge not running"** — Call `start_bridge` first. The iOS bridge can take up to a minute to come up.
 
