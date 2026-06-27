@@ -252,6 +252,12 @@ const TOOLS = [
       properties: {
         device_id: { type: "string", description: "Device ID" },
         path: { type: "string", description: "Local file path to the app (.apk or .ipa)" },
+        resign: { type: "boolean", description: "Sign the IPA with iloader before installing (iOS only)" },
+        apple_id: { type: "string", description: "Apple ID for signing (optional; used when resign=true)" },
+        password: { type: "string", description: "Apple ID password for signing (optional; uses cached credentials if empty)" },
+        profile_path: { type: "string", description: "Provisioning profile to reuse for an offline re-sign (with cert_path/key_path); falls back to online signing if invalid" },
+        cert_path: { type: "string", description: "Signing certificate PEM to reuse for an offline re-sign" },
+        key_path: { type: "string", description: "Signing private key PEM to reuse for an offline re-sign" },
       },
       required: ["device_id", "path"],
     },
@@ -271,16 +277,62 @@ const TOOLS = [
   // DSL execution
   {
     name: "execute_dsl",
-    description: `Execute a batch of DSL commands on a device. This is the primary tool for all device interaction — tap, type, swipe, observe, launch apps, assertions, web automation, and more.
+    description: `The example below is the full command surface. For richer semantics - per-action defaults, platform notes, retry/failure strategies, observe and scroll guidance, web/OCR caveats - read the MCP resource mobai://reference/device-automation. Read it the first time you hit anything the example doesn't make obvious.
 
-You MUST read the MCP resource mobai://reference/device-automation to learn how to control devices before using this tool.
+Execute a batch of DSL commands on a device. This is the primary tool for all device interaction - tap, type, swipe, observe, launch apps, assertions, web automation, and more.
 
-Input: JSON string with "version": "0.2" and "steps" array. Example:
-{"version":"0.2","steps":[
-  {"action":"open_app","bundle_id":"com.apple.Preferences"},
-  {"action":"tap","predicate":{"text_contains":"Wi-Fi"}},
-  {"action":"wait_for","predicate":{"type":"switch"},"timeout_ms":3000}
-]}`,
+Input: JSON string with "version": "0.2" and a "steps" array. Optional script-wide "params" (declared defaults, substituted as \${name}) and "on_fail" (strategy: abort|skip|retry|replan|require_user; retry also takes max_retries, retry_delay_ms, fallback_strategy). Any step may carry its own "on_fail".
+
+Every action below appears at least once - this is the full command surface (semantics, defaults, and platform notes are in mobai://reference/device-automation):
+{"version":"0.2","params":{"query":"shoes"},"on_fail":{"strategy":"retry","max_retries":2,"retry_delay_ms":1000,"fallback_strategy":{"strategy":"skip"}},"steps":[
+  {"action":"open_app","bundle_id":"com.apple.Preferences","fresh":true,"debug":false},
+  {"action":"kill_app","bundle_id":"com.apple.mobilesafari"},
+  {"action":"open_link","url":"myapp://profile/42"},
+  {"action":"tap","predicate":{"text_contains":"Wi-Fi","type":"button"}},
+  {"action":"tap","coords":{"x":200,"y":640}},
+  {"action":"double_tap","predicate":{"text":"Photo"}},
+  {"action":"two_finger_tap","predicate":{"text":"Map"}},
+  {"action":"long_press","predicate":{"text":"Item"},"duration_ms":1000},
+  {"action":"pinch","predicate":{"text_contains":"Map"},"scale":0.5,"velocity":1.0},
+  {"action":"type","text":"\${query}","predicate":{"type":"input"},"clear_first":true,"dismiss_keyboard":true},
+  {"action":"type_secret","secret_id":"test-account-password","predicate":{"type":"input","text_contains":"Password"}},
+  {"action":"clear","predicate":{"type":"input"}},
+  {"action":"toggle","predicate":{"type":"switch","text_contains":"Wi-Fi"},"state":"on"},
+  {"action":"press_key","key":"enter"},
+  {"action":"swipe","direction":"up","distance":"medium"},
+  {"action":"swipe","from_coords":{"x":200,"y":600},"to_coords":{"x":200,"y":200},"duration_ms":300},
+  {"action":"scroll","direction":"down","to_element":{"predicate":{"text":"Privacy"}},"predicate":{"type":"scrollview"},"max_scrolls":10,"amount":"page"},
+  {"action":"drag","from":{"predicate":{"text":"Item"}},"to_element":{"predicate":{"text":"Trash"}},"press_duration_ms":500,"hold_duration_ms":200,"duration_ms":500},
+  {"action":"drag","from_coords":{"x":100,"y":400},"to_coords":{"x":300,"y":400}},
+  {"action":"drag_path","points":[{"x":100,"y":400,"duration_ms":200},{"x":150,"y":300,"duration_ms":150},{"x":300,"y":500,"duration_ms":300}]},
+  {"action":"navigate","target":"home"},
+  {"action":"set_location","lat":40.7128,"lon":-74.0060},
+  {"action":"reset_location"},
+  {"action":"siri","prompt":"Search YouTube for cat videos"},
+  {"action":"if_exists","predicate":{"text":"Allow"},"then":[{"action":"tap","predicate":{"text":"Allow"}}],"else":[{"action":"tap","predicate":{"text":"Don't Allow"}}]},
+  {"action":"delay","duration_ms":1000},
+  {"action":"wait_for","predicate":{"text":"Welcome"},"timeout_ms":5000,"poll_interval_ms":500},
+  {"action":"assert_exists","predicate":{"text":"Success"},"timeout_ms":3000},
+  {"action":"assert_not_exists","predicate":{"text":"Error"}},
+  {"action":"assert_count","predicate":{"type":"cell"},"count":5},
+  {"action":"assert_screen_changed","threshold_percent":15},
+  {"action":"metrics_start","types":["system_cpu","fps"],"interval_ms":1000,"label":"login_flow","capture_logs":true,"thresholds":{"cpu_high":80,"fps_low":45}},
+  {"action":"metrics_stop","format":"summary"},
+  {"action":"record_start","file_path":"/tmp/mobai/rec"},
+  {"action":"record_stop"},
+  {"action":"select_web_context","url_contains":"google.com"},
+  {"action":"navigate","context":"web","url":"https://example.com"},
+  {"action":"tap","context":"web","predicate":{"css_selector":"button.submit"}},
+  {"action":"type","context":"web","predicate":{"css_selector":"input#email"},"text":"user@example.com","clear_first":true},
+  {"action":"execute_js","context":"web","script":"return document.title","async":false},
+  {"action":"screenshot","file_path":"/tmp/mobai","name":"final_state"},
+  {"action":"wait_for","stable":true,"timeout_ms":3000},
+  {"action":"observe","include":["ui_tree"],"only_visible":true,"filter":{"text_regex":"Settings|Wi-Fi"},"store_as":"end_state"}
+]}
+
+Predicate - object passed in a step's "predicate"/"from"/"to_element". Combine fields (AND); prefer text_contains over exact text. All native fields:
+{"text":"exact","text_contains":"substr","text_starts_with":"prefix","text_regex":"\\d+ items","value":"typed value","value_contains":"typed substr","type":"button|input|switch|text|image|cell|scrollview","accessibility_id":"login_btn","enabled":true,"visible":true,"selected":false,"index":0,"bounds_hint":"top_half|bottom_half|left_half|right_half|center","near":{"text_contains":"Email","direction":"below|above|left|right|any","max_distance":100},"parent_of":{"text":"child label"}}
+Web predicate (context:"web") uses instead: {"css_selector":"button.submit"}.`,
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -485,8 +537,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "list_apps":
         return textResult(await doGet(`/devices/${args?.device_id}/apps`));
 
-      case "install_app":
-        return textResult(await doPost(`/devices/${args?.device_id}/install-app`, { path: args?.path }));
+      case "install_app": {
+        const body: any = { path: args?.path };
+        if (args?.resign) {
+          body.resign = true;
+          if (args?.apple_id) body.appleId = args.apple_id;
+          if (args?.password) body.password = args.password;
+          if (args?.profile_path) body.profilePath = args.profile_path;
+          if (args?.cert_path) body.certPath = args.cert_path;
+          if (args?.key_path) body.keyPath = args.key_path;
+        }
+        return textResult(await doPost(`/devices/${args?.device_id}/install-app`, body));
+      }
 
       case "uninstall_app":
         return textResult(await doDelete(`/devices/${args?.device_id}/apps/${encodeURIComponent(args?.bundle_id as string)}`));

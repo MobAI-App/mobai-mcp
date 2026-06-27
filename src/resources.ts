@@ -164,7 +164,6 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <predicate context="web">
     <field name="css_selector" type="string">CSS selector</field>
-    <field name="xpath" type="string">XPath expression</field>
   </predicate>
 
   <failure-strategy>
@@ -220,6 +219,15 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <example>{"action": "type", "text": "Hello", "predicate": {"type": "input"}, "clear_first": true}</example>
   </action>
 
+  <action name="type_secret">
+    Type a stored credential without ever exposing its value. secret_id names a credential saved in the app; its value is resolved from the keychain at run time and typed on-device - it never appears in the script, logs, results, or the model context. Use for passwords/tokens in login steps. Same field-targeting as type.
+    <field name="secret_id" required="yes">Id of a stored credential (see list_secrets)</field>
+    <field name="predicate">Optional target field to focus first</field>
+    <field name="clear_first" type="bool"/>
+    <field name="dismiss_keyboard" type="bool" default="false"/>
+    <example>{"action": "type_secret", "secret_id": "test-account-password", "predicate": {"type": "input", "text_contains": "Password"}}</example>
+  </action>
+
   <action name="clear">
     Clear a field's text without typing. With a predicate, focuses that field first; without one, clears the currently focused field.
     <field name="predicate">Optional target element</field>
@@ -238,11 +246,13 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <action name="scroll">
     Direction = semantic (where to look), not finger movement.
-    <field name="direction" required="yes">down (look below), up (look above)</field>
+    <field name="direction" required="yes">down (look below), up (look above), left (look left), right (look right). All four directions are supported - use left/right for horizontal scrollviews (carousels, palettes, paging) instead of falling back to raw-coordinate swipe.</field>
+    <field name="predicate" type="Predicate">Targets a specific scrollable container so the gesture lands inside it (e.g. {"type": "scrollview"} or {"parent_of": {"text": "Work"}}). Without it the gesture is applied at screen center - set this when multiple scrollviews share the screen (e.g. a horizontal palette above a vertical list) to avoid scrolling the wrong one.</field>
     <field name="to_element" type="TargetElement"/>
     <field name="max_scrolls" type="int" default="10"/>
     <field name="amount">small, page, full</field>
     <example>{"action": "scroll", "direction": "down", "to_element": {"predicate": {"text": "Privacy"}}, "max_scrolls": 10}</example>
+    <example>{"action": "scroll", "direction": "right", "predicate": {"type": "scrollview"}}</example>
     <note>scroll with to_element returns "reached end of scrollable content" if the list ends before the element is found. If it returns "element not found after scrolling" instead, the list has more content — increase max_scrolls or call scroll again to continue searching.</note>
   </action>
 
@@ -340,6 +350,13 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <example>{"action": "reset_location"}</example>
   </action>
 
+  <action name="open_link">
+    Opens a URL or deep link on the device. The OS routes custom schemes (myapp://path) to the registered app, so this jumps straight to a screen without navigating the UI. Use for deep-link entry points instead of tapping through the app.
+    <field name="url" required="yes">Full URL or deep link, e.g. https://example.com or myapp://profile/42</field>
+    <example>{"action": "open_link", "url": "myapp://profile/42"}</example>
+    <example>{"action": "open_link", "url": "https://example.com"}</example>
+  </action>
+
   <action name="siri">
     iOS only. Sends a voice command to Siri service on iOS devices. Auto-approves consent dialogs, captures Siri's response text, then dismisses the Siri UI.
     Use for triggering SiriKit intents and App Shortcuts registered by apps (media playback, messaging, banking shortcuts, etc.).
@@ -363,7 +380,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </action>
 
   <action name="tap/type/press_key/wait_for/if_exists">
-    Same fields as native but use css_selector or xpath in predicate.
+    Same fields as native but use css_selector in predicate.
     <example>{"action": "tap", "context": "web", "predicate": {"css_selector": "button.submit"}}</example>
     <example>{"action": "type", "context": "web", "predicate": {"css_selector": "input#email"}, "text": "user@example.com", "clear_first": true}</example>
     Web press_key keys: enter, tab, delete, escape.
@@ -466,7 +483,7 @@ const TESTING_REF = `<testing-reference>
 
 <rules>
   <rule>Never ask the user for information you can get yourself — use observe, list_apps, get_ui_tree.</rule>
-  <rule>Always add wait_for before every element interaction (tap, type, toggle, long_press, double_tap, drag). Exception: the element was asserted on the immediately preceding line.</rule>
+  <rule>Add wait_for before an interaction only when the PREVIOUS action may have changed the screen and the target might not be ready yet - after opening an app, navigating, a screen transition, opening a modal/sheet, scrolling, or submitting something that reloads. If the previous action left the same screen up (typing into a field, toggling a switch, tapping a control that stays put) the element is already there - skip wait_for. Never add it before the element you just asserted.</rule>
   <rule>Always use predicates over coordinates — predicates survive layout changes.</rule>
   <rule>Always prefer UI tree and OCR over screenshots for element discovery.</rule>
   <rule>Your first action must be observe — never ask the user first.</rule>
@@ -546,6 +563,8 @@ const TESTING_REF = `<testing-reference>
     type ~"Field" → "text"             — partial match field
     type "Field" → "text" clear        — clear first
     type "Field" → "text" keep_keyboard — keep keyboard open
+    type_secret "Field" → "secret-id"  - type a stored credential (value never in script/logs)
+    type_secret "secret-id"             - type credential into focused field
     swipe up|down|left|right            — swipe direction
     swipe up distance:long              — short/medium/long
     swipe up duration:500               — custom duration (ms)
@@ -553,6 +572,7 @@ const TESTING_REF = `<testing-reference>
     scroll down                         — scroll
     scroll down to "Element"            — scroll until visible
     scroll down to "Footer" max_scrolls:10 — limit attempts
+    scroll right in type:scrollview     - target a specific container
     toggle "Wi-Fi" on|off              — toggle switch
     toggle type:switch near "Wi-Fi" on  — modifier-only
     drag "Item" to "Trash"             — drag element
@@ -572,6 +592,7 @@ const TESTING_REF = `<testing-reference>
     paste_text "Field"                  — paste clipboard into element
     set_location 40.7128,-74.0060       — simulate GPS location (lat,lon)
     reset_location                      — stop location simulation
+    open_link "myapp://profile/42"      - open a URL or deep link (routes to the app)
     siri "Search YouTube for cats"      — invoke Siri with voice command (iOS only)
     observe                             — observe screen
     screenshot "path.png"               — take screenshot
