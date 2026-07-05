@@ -95,6 +95,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   <observe-guidance>
     Prefer UI tree and OCR over screenshots — screenshots consume far more context and are slower. Only use screenshots for visual verification (layout, colors, images).
     only_visible: false — use ONLY for data collection from scrollable views (returns ALL elements including off-screen). NEVER when interacting — off-screen elements cannot be tapped.
+    compact: true — token-lean ui_tree (same elements as the full tree, as flat [index] Type "label" #id [state] lines; coordinates and indentation removed, ~2x fewer tokens). Use when you select by id/index/text. Keep the default full tree when you need coordinates or spatial layout (e.g. coordinate taps, near/spatial reasoning).
   </observe-guidance>
 
   <ocr-fallback>
@@ -307,9 +308,15 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="store_as" type="string">Store result in named variable</field>
     <field name="include_keyboard" type="bool" default="false"/>
     <field name="only_visible" type="bool" default="true">MUST be false when collecting data from scrollable lists/search results. MUST be true when interacting with elements — off-screen elements cannot be tapped.</field>
+    <field name="compact" type="bool" default="false">Token-lean ui_tree: same elements as the full tree, formatted as flat [index] Type "label" #id [state] lines with coordinates and indentation removed (~2x fewer tokens). Use when selecting by id/index/text; keep false when you need coordinates or spatial layout.</field>
     <field name="filter">text_regex or bounds {"x","y","width","height"} to reduce output</field>
     <note>OCR (iOS only): returns text with tap coordinates. Useful for system dialogs missing from UI tree.</note>
     <example>{"action": "observe", "include": ["ui_tree"], "filter": {"text_regex": "Settings|Wi-Fi"}}</example>
+  </action>
+
+  <action name="audit">
+    <note>Runs deterministic UI checks on the current native screen and returns findings plus an annotated screenshot (path under observations.native.screenshot, with red boxes labelled by element id). Findings are EVIDENCE, not conclusions (e.g. margins are 18px/34px, not "misaligned") - cross-check the annotated screenshot to decide which are real bugs. Checks: touch_target, clipping, alignment, spacing, safe_area, accessibility. Dense grids of tiny repeated controls (paint canvas, keyboard) are skipped to avoid noise.</note>
+    <example>{"action": "audit"}</example>
   </action>
 
   <action name="wait_for">

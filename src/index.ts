@@ -281,6 +281,8 @@ const TOOLS = [
 
 Execute a batch of DSL commands on a device. This is the primary tool for all device interaction - tap, type, swipe, observe, launch apps, assertions, web automation, and more.
 
+To find visual/UI bugs on the current screen, run a single {"action":"audit"} step: it returns deterministic findings (touch targets, clipping, alignment, spacing, safe area, accessibility) plus an annotated screenshot whose red boxes are labelled with the element ids in the findings. Findings are evidence, not verdicts - cross-check the annotated screenshot to decide which are real bugs.
+
 Input: JSON string with "version": "0.2" and a "steps" array. Optional script-wide "params" (declared defaults, substituted as \${name}) and "on_fail" (strategy: abort|skip|retry|replan|require_user; retry also takes max_retries, retry_delay_ms, fallback_strategy). Any step may carry its own "on_fail".
 
 Every action below appears at least once - this is the full command surface (semantics, defaults, and platform notes are in mobai://reference/device-automation):
@@ -327,7 +329,8 @@ Every action below appears at least once - this is the full command surface (sem
   {"action":"execute_js","context":"web","script":"return document.title","async":false},
   {"action":"screenshot","file_path":"/tmp/mobai","name":"final_state"},
   {"action":"wait_for","stable":true,"timeout_ms":3000},
-  {"action":"observe","include":["ui_tree"],"only_visible":true,"filter":{"text_regex":"Settings|Wi-Fi"},"store_as":"end_state"}
+  {"action":"observe","include":["ui_tree"],"only_visible":true,"filter":{"text_regex":"Settings|Wi-Fi"},"store_as":"end_state"},
+  {"action":"audit"}
 ]}
 
 Predicate - object passed in a step's "predicate"/"from"/"to_element". Combine fields (AND); prefer text_contains over exact text. All native fields:
