@@ -340,6 +340,19 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <example>{"action": "if_exists", "predicate": {"text": "Allow"}, "then": [{"action": "tap", "predicate": {"text": "Allow"}}]}</example>
   </action>
 
+  <action name="repeat">
+    Loop a body of steps. Set EXACTLY ONE of times/while/until/condition. Bodies nest (repeat inside repeat/if_exists and vice versa). The 0-based iteration counter is exposed to body steps as the variable repeat_index (restored to its prior value after the loop, so nested loops shadow correctly).
+    <field name="times" type="string" required="one-of">Counted loop; string so \${param} survives substitution (e.g. "5" or "\${count}"). No safety cap.</field>
+    <field name="while" type="Predicate" required="one-of">Loop while the predicate matches (re-checked before each iteration).</field>
+    <field name="until" type="Predicate" required="one-of">Loop until the predicate matches (i.e. while it does NOT match).</field>
+    <field name="condition" type="string" required="one-of">Host-JS expression, while-semantics: loop while it is truthy (e.g. "vars.retries &lt; 3"). Runs in the same VM as run_script/eval_script.</field>
+    <field name="max_iterations" type="int">Safety cap for while/until/condition (default 100). Hitting the cap is a step FAILURE, so it participates in on_fail/retry. Ignored for times.</field>
+    <field name="body" type="[]Step" required="yes">Steps run each iteration.</field>
+    <example>{"action": "repeat", "times": "3", "body": [{"action": "tap", "predicate": {"text": "Increment"}}]}</example>
+    <example>{"action": "repeat", "while": {"text": "Loading"}, "max_iterations": 20, "body": [{"action": "delay", "duration_ms": 500}]}</example>
+    <example>{"action": "repeat", "condition": "vars.n &lt; 3", "body": [{"action": "eval_script", "script": "vars.n = (vars.n || 0) + 1"}]}</example>
+  </action>
+
   <action name="kill_app">
     <field name="bundle_id" required="yes"/>
     <example>{"action": "kill_app", "bundle_id": "com.apple.mobilesafari"}</example>
@@ -374,6 +387,32 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <note>Check the app's siri field in the installed apps list (observe with include: installed_apps) to see which intents and activities it supports before calling siri.</note>
   </action>
 </native-actions>
+
+<host-scripting>
+  Run short host-side JavaScript in an embedded VM (NOT on the device - this is separate from web execute_js). Use it to compute values, seed test data, or call a backend between UI steps. No filesystem, no require/import, no device access.
+
+  <globals>
+    vars (alias output) - the live DSL variable map. Read a value with vars.name; write one with vars.name = ... and it becomes visible to later \${name} substitution and to repeat condition expressions.
+    http.get(url[, opts]) / .post / .put / .delete / .request(method, url[, opts]) - synchronous HTTP. opts = {headers: {..}, body: string|object, timeout_ms: n}. Object bodies are JSON-marshalled (Content-Type defaults to application/json). Returns {status, ok, headers, body}; parse body yourself with JSON.parse.
+    console.log/info/warn/error - captured into the step result logs and forwarded to the app log.
+    Built-ins JSON, Math, Date, String, Array are available.
+  </globals>
+
+  <action name="run_script">
+    Execute a JS file. The .mob parser embeds the file content into "script" at parse time so the compiled DSL stays self-contained; raw JSON callers may instead pass an absolute "script_path" read at exec time.
+    <field name="script" type="string" required="one-of">Embedded JS source.</field>
+    <field name="script_path" type="string" required="one-of">Absolute path to a .js file (read at execution time).</field>
+    <example>{"action": "run_script", "script": "var r = http.get('https://api.example.com/seed'); vars.seed_id = JSON.parse(r.body).id;"}</example>
+  </action>
+
+  <action name="eval_script">
+    Evaluate an inline JS expression. The completion value is stored in store_as (if set) and also returned as the step's js_value.
+    <field name="script" type="string" required="yes">JS expression/source.</field>
+    <field name="store_as" type="string">Variable name to store the completion value under.</field>
+    <example>{"action": "eval_script", "script": "vars.user_id = 'u-' + Date.now()"}</example>
+    <example>{"action": "eval_script", "script": "1 + 1", "store_as": "two"}</example>
+  </action>
+</host-scripting>
 
 <web-actions>
   Require select_web_context first. Add "context": "web" to actions. Always try native automation first.
@@ -602,7 +641,7 @@ const TESTING_REF = `<testing-reference>
     open_link "myapp://profile/42"      - open a URL or deep link (routes to the app)
     siri "Search YouTube for cats"      — invoke Siri with voice command (iOS only)
     observe                             — observe screen
-    screenshot "path.png"               — take screenshot
+    screenshot "dir"                    - save screenshot into dir (optional; filename auto)
   </actions>
 
   <assertions>
@@ -664,6 +703,33 @@ const TESTING_REF = `<testing-reference>
         tap "Other"
     }
   </conditionals>
+
+  <loops>
+    repeat runs its brace body in a loop. Four forms; pick one:
+      repeat 5 times { tap "Increment" }           - counted (literal or \${count})
+      repeat \${count} times { ... }                 - count from a param/extract
+      repeat while "Loading" { delay 500 }          - while a predicate matches (loops until it disappears)
+      repeat until "Done" type:button { scroll down } - until a predicate appears
+      repeat while type:spinner max:20 { ... }      - max:N overrides the safety cap (default 100)
+      repeat while js:"vars.n < 3" { ... }          - loop while a host-JS expression is truthy
+    The 0-based iteration number is available inside the body as \${repeat_index}.
+    while/until/js loops fail the step if they hit the cap without resolving (so on_fail:retry etc apply). Bodies nest:
+      repeat 3 times {
+          if_exists "Ad" { tap "Close" }
+      }
+  </loops>
+
+  <host-scripting>
+    Run host-side JavaScript (an embedded VM, NOT device web JS). Compute values, seed data, or call a backend between steps.
+      script "./scripts/seed.js"                    - run a JS file (path relative to this .mob file)
+      eval "vars.user_id = 'u-' + Date.now()"       - run inline JS
+      eval "1 + 1" store_as:two                     - store the result value in \${two}
+    JS globals (nothing else - no filesystem, no require, no device):
+      vars (alias output) - live DSL variables. vars.name reads; vars.name = ... writes and is visible to later \${name} and to repeat while js: conditions.
+      http.get(url[, opts]) / .post / .put / .delete / .request(method, url[, opts]). opts = {headers, body, timeout_ms}. Object bodies are sent as JSON. Returns {status, ok, headers, body}; JSON.parse the body yourself.
+      console.log/info/warn/error - shown under the step in the run results.
+    Example: eval "var r = http.get('https://api.example.com/me'); vars.name = JSON.parse(r.body).name"
+  </host-scripting>
 
   <run-includes>
     run "./path/to/other.mob"            — inline another .mob file at compile time
