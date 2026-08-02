@@ -14,6 +14,7 @@ import {
   ListResourcesRequestSchema,
   ReadResourceRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
+import * as crypto from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -77,20 +78,29 @@ function screenshotToFile(body: any): string {
 // HTTP helpers
 // ---------------------------------------------------------------------------
 
-async function doRequest(
+/**
+ * doRequestRaw performs an HTTP request against the API, optionally with an
+ * X-Lease-Token header (empty leaseToken = no header). No error-status
+ * folding: the caller gets the body and status and decides how to surface
+ * failures.
+ */
+async function doRequestRaw(
   method: string,
   urlPath: string,
-  payload?: any,
+  payload: any,
+  leaseToken: string,
   timeoutMs: number = DEFAULT_TIMEOUT_MS
-): Promise<any> {
+): Promise<{ status: number; body: any }> {
   const url = urlPath.startsWith("http") ? urlPath : `${API_BASE_URL}${urlPath}`;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (leaseToken) headers["X-Lease-Token"] = leaseToken;
     const opts: RequestInit = {
       method,
-      headers: { "Content-Type": "application/json" },
+      headers,
       signal: controller.signal,
     };
     if (payload !== undefined && ["POST", "PUT", "PATCH"].includes(method)) {
@@ -113,13 +123,161 @@ async function doRequest(
     } catch {
       body = text;
     }
-    if (response.status >= 400) {
-      throw new Error(`HTTP ${response.status}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
-    }
-    return body;
+    return { status: response.status, body };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+/**
+ * doRequest attaches this process's device lease token as X-Lease-Token, so
+ * actions pass claim enforcement when the MobAI "Require device claim"
+ * setting is enabled. On a 409 CLAIM_REQUIRED for a device-scoped call it
+ * auto-claims the device and retries once, so agents never have to claim
+ * explicitly; remaining lease errors are rewritten to MCP-native wording
+ * (claim_device, not raw HTTP recipes). No lease held means no header is
+ * attached - harmless when the setting is off.
+ */
+async function doRequest(
+  method: string,
+  urlPath: string,
+  payload?: any,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS
+): Promise<any> {
+  const deviceId = deviceIdForRequest(urlPath, payload);
+  let { status, body } = await doRequestRaw(method, urlPath, payload, deviceId ? leases.get(deviceId) ?? "" : "", timeoutMs);
+  if (status < 400) return body;
+  if (status === 409 && apiErrorCode(body) === "CLAIM_REQUIRED" && deviceId) {
+    let claim: ClaimResult;
+    try {
+      claim = await claimDevice(deviceId, "");
+    } catch (err) {
+      throw new Error(`could not auto-claim device ${deviceId}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    ({ status, body } = await doRequestRaw(method, urlPath, payload, claim.leaseToken, timeoutMs));
+    if (status < 400) return body;
+  }
+  throw apiHTTPError(status, body);
+}
+
+// ---------------------------------------------------------------------------
+// Device leasing (claim enforcement)
+// ---------------------------------------------------------------------------
+//
+// The stdio transport is one server process per client session, so Go's
+// per-session lease map becomes a per-process map. A process may hold leases
+// on several devices at once (multi-device flows are normal: chat between two
+// simulators, host app + companion); the request wrapper picks the token
+// matching the device a call targets.
+
+/** Random identity for this process, used in default holder labels and clientIds. */
+const PROCESS_IDENTITY = crypto.randomBytes(4).toString("hex");
+
+/** deviceID -> lease token held by this process. */
+const leases = new Map<string, string>();
+
+/**
+ * deviceIdForRequest resolves which device an API call targets: the
+ * /devices/{id}/... path segment, else a "device_id" field in the JSON
+ * payload (used by e.g. test runs). "" = not device-scoped.
+ */
+function deviceIdForRequest(urlPath: string, payload?: any): string {
+  const id = devicePathId(urlPath);
+  if (id) return id;
+  if (payload && typeof payload === "object" && typeof payload.device_id === "string") {
+    return payload.device_id;
+  }
+  return "";
+}
+
+/**
+ * devicePathId extracts the device ID from a /devices/{id}/... API path, or ""
+ * when the path is not device-scoped (including the claim/release/renew lease
+ * endpoints themselves).
+ */
+function devicePathId(urlPath: string): string {
+  if (!urlPath.startsWith("/devices/")) return "";
+  let id = urlPath.slice("/devices/".length).split("/")[0].split("?")[0];
+  try {
+    id = decodeURIComponent(id);
+  } catch {
+    // keep the raw segment
+  }
+  if (id === "" || id === "claim" || id === "release" || id === "renew") return "";
+  return id;
+}
+
+function apiErrorCode(body: any): string {
+  return body && typeof body === "object" && typeof body.code === "string" ? body.code : "";
+}
+
+/**
+ * apiHTTPError converts an API error response into an agent-facing error.
+ * Lease 409s get MCP-native wording; everything else keeps the HTTP status
+ * prefix.
+ */
+function apiHTTPError(status: number, body: any): Error {
+  switch (apiErrorCode(body)) {
+    case "CLAIM_REQUIRED":
+      return new Error(
+        "device claim required: call the claim_device tool (device_id optional), then retry; the lease is attached automatically to this session's calls"
+      );
+    case "DEVICE_IN_USE":
+      if (typeof body?.error === "string" && body.error) {
+        return new Error(body.error);
+      }
+      break;
+  }
+  return new Error(`HTTP ${status}: ${typeof body === "string" ? body : JSON.stringify(body)}`);
+}
+
+interface ClaimResult {
+  deviceId: string;
+  leaseToken: string;
+  expiresAt: string;
+}
+
+/**
+ * claimDevice claims deviceId (or any free local device when empty) for this
+ * process and stores the lease token for auto-attach.
+ */
+async function claimDevice(deviceId: string, holder: string): Promise<ClaimResult> {
+  const body: any = { holder: holder || `mcp-session-${PROCESS_IDENTITY}` };
+  if (deviceId) {
+    body.device = deviceId;
+    // Per-process-and-device clientId makes re-claiming the same device
+    // idempotent (never a conflict with yourself) while keeping tokens
+    // unique across this process's devices. Any-free claims skip it: an
+    // idempotent id would hand back the already-claimed device instead of
+    // a new free one.
+    body.clientId = `mcp-${PROCESS_IDENTITY}-${deviceId}`;
+  }
+  const { status, body: resp } = await doRequestRaw("POST", "/devices/claim", body, "");
+  if (status >= 400) throw apiHTTPError(status, resp);
+  const result = resp as ClaimResult;
+  leases.set(result.deviceId, result.leaseToken);
+  return result;
+}
+
+/** releaseToken posts a lease release, treating 404 (already expired) as done. */
+async function releaseToken(token: string): Promise<void> {
+  const { status } = await doRequestRaw("POST", "/devices/release", { leaseToken: token }, "");
+  if (status >= 400 && status !== 404) {
+    throw new Error(`release failed with HTTP ${status}`);
+  }
+}
+
+/**
+ * releaseAllLeases best-effort releases every lease this process holds
+ * (called on shutdown). Failures are ignored: the server-side lease expires
+ * on its own after the idle timeout.
+ */
+async function releaseAllLeases(): Promise<void> {
+  const tokens = [...leases.values()];
+  leases.clear();
+  await Promise.allSettled(
+    tokens.map((token) => doRequestRaw("POST", "/devices/release", { leaseToken: token }, "", 3000))
+  );
 }
 
 const doGet = (p: string) => doRequest("GET", p);
@@ -164,7 +322,8 @@ const TOOLS = [
   // Device management
   {
     name: "list_devices",
-    description: "List all connected Android and iOS devices",
+    description:
+      'List all connected Android and iOS devices. Devices with "remote": true are physically attached to ANOTHER machine (a peer MobAI node, hostname in "node") and devices with "cloud": true live in a cloud device farm - all MobAI tools (tap, observe, DSL, screenshots, recording) work on them transparently, but host-local tooling (ffmpeg, simctl, adb, xcodebuild) cannot reach them; stay within MobAI tools for those devices. Devices with "inUse": true are claimed by the holder named in "inUseBy" - claim a different device or wait for the lease to expire.',
     inputSchema: { type: "object" as const, properties: {}, required: [] },
   },
   {
@@ -178,10 +337,14 @@ const TOOLS = [
   },
   {
     name: "start_bridge",
-    description: "Start the automation bridge on a device. Required before interacting with the device.",
+    description: "Start the automation bridge on a device. Required before interacting with the device. For cloud devices this allocates the provider session; pass \"app\" to pick the app under test (e.g. the appRef returned by install_app).",
     inputSchema: {
       type: "object" as const,
-      properties: { device_id: { type: "string", description: "Device ID" } },
+      properties: {
+        device_id: { type: "string", description: "Device ID" },
+        app: { type: "string", description: "Cloud devices only: provider app ref to install at session start (bs://…, storage:…, AWS upload ARN). Overrides the saved session config. Ignored for local devices." },
+        run_options: { type: "object", description: "Cloud devices only: free-form provider run options (string values) merged into the session config." },
+      },
       required: ["device_id"],
     },
   },
@@ -192,6 +355,32 @@ const TOOLS = [
       type: "object" as const,
       properties: { device_id: { type: "string", description: "Device ID" } },
       required: ["device_id"],
+    },
+  },
+  // Device leasing (claim enforcement)
+  {
+    name: "claim_device",
+    description:
+      "Claim exclusive use of a device for this session. You rarely need this: a host that requires claims auto-claims on your first action, and a host that does not require them needs no claim at all. Do not call it to fix a device that is missing, still connecting, or busy - none of those are lease problems. Use it only to reserve a device up front or to set a custom holder label. A session can hold several devices at once; each lease is attached automatically to subsequent calls targeting its device and auto-renews on every action, expiring only after the app's configured idle timeout. Call release_device when you are done with a device.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device ID to claim. Empty = claim any free local device." },
+        holder: { type: "string", description: "Short label shown in the MobAI device list, e.g. your agent or task name." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "release_device",
+    description:
+      "Release device lease(s) held by this session. With device_id, releases that device's lease; without, releases every lease this session holds. Succeeds quietly if nothing is held.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        device_id: { type: "string", description: "Device to release. Empty = release all devices claimed by this session." },
+      },
+      required: [],
     },
   },
   // Screenshot
@@ -246,7 +435,7 @@ const TOOLS = [
   },
   {
     name: "install_app",
-    description: "Install an app on the device from a local file path (.apk for Android, .ipa for iOS)",
+    description: "Install an app on the device from a local file path (.apk for Android, .ipa for iOS). For cloud devices nothing is installed directly: the build is uploaded to the provider's app storage and the response returns an appRef - pass it to start_bridge as \"app\" (restart the bridge if a session is already running).",
     inputSchema: {
       type: "object" as const,
       properties: {
@@ -513,11 +702,54 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "get_device":
         return textResult(await doGet(`/devices/${args?.device_id}`));
 
-      case "start_bridge":
-        return textResult(await doPost(`/devices/${args?.device_id}/bridge/start`));
+      case "start_bridge": {
+        const body: any = {};
+        if (args?.app) body.app = args.app;
+        if (args?.run_options && typeof args.run_options === "object") {
+          const runOptions: Record<string, string> = {};
+          for (const [k, v] of Object.entries(args.run_options as Record<string, unknown>)) {
+            runOptions[k] = String(v);
+          }
+          if (Object.keys(runOptions).length > 0) body.runOptions = runOptions;
+        }
+        return textResult(await doPost(`/devices/${args?.device_id}/bridge/start`, Object.keys(body).length > 0 ? body : undefined));
+      }
 
       case "stop_bridge":
         return textResult(await doPost(`/devices/${args?.device_id}/bridge/stop`));
+
+      // Device leasing
+      case "claim_device": {
+        const resp = await claimDevice((args?.device_id as string) || "", (args?.holder as string) || "");
+        return textResult(
+          `Claimed device ${resp.deviceId} (lease expires ${resp.expiresAt}). The lease auto-renews on every action from this session; call release_device when you are done.`
+        );
+      }
+
+      case "release_device": {
+        const deviceId = (args?.device_id as string) || "";
+        if (deviceId) {
+          const token = leases.get(deviceId);
+          if (!token) return textResult(`No lease held by this session for device ${deviceId}.`);
+          leases.delete(deviceId);
+          await releaseToken(token);
+          return textResult(`Lease on ${deviceId} released.`);
+        }
+        const held = [...leases.entries()];
+        leases.clear();
+        if (held.length === 0) return textResult("No leases held by this session.");
+        const released: string[] = [];
+        for (const [id, token] of held) {
+          try {
+            await releaseToken(token);
+            released.push(id);
+          } catch {
+            // expired server-side = already released
+          }
+        }
+        released.sort();
+        return textResult(`Released ${held.length} lease(s): [${released.join(" ")}].`);
+      }
 
       // Screenshots
       case "get_screenshot": {
@@ -695,6 +927,27 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 // ---------------------------------------------------------------------------
 // Start
 // ---------------------------------------------------------------------------
+
+// Best-effort lease cleanup on shutdown. Failures are ignored and nothing
+// here may block or throw: the server-side idle timeout is the backstop.
+let shuttingDown = false;
+function shutdown(exitCode?: number): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  releaseAllLeases()
+    .catch(() => {})
+    .finally(() => {
+      if (exitCode !== undefined) process.exit(exitCode);
+    });
+}
+
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
+// StdioServerTransport does not watch for stdin EOF (the normal way an MCP
+// client ends a stdio session), so watch it here; the pending release fetches
+// keep the event loop alive until they settle, then the process exits.
+process.stdin.on("end", () => shutdown());
+process.stdin.on("close", () => shutdown());
 
 async function main() {
   const transport = new StdioServerTransport();

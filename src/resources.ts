@@ -138,6 +138,12 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     Observe before acting on unfamiliar screens.
     NO_MATCH / failed assert_exists: if the element exists off-screen, the error lists it under "candidates" — scroll to bring it into view (off-screen elements cannot be tapped). Empty candidates means it is genuinely absent or not yet rendered.
   </troubleshooting>
+
+  <device-leasing>
+    Do not claim devices. Most hosts do not require it, and one that does says so: a call fails with 409 CLAIM_REQUIRED. That error is the only reason to claim. A device that is missing, still connecting, or busy is not a lease problem and claiming will not fix it.
+    Over MCP a CLAIM_REQUIRED failure is handled for you - the device is claimed and the call retried - so claim_device is only for reserving a device up front or setting a holder label. Over plain HTTP, POST /api/v1/devices/claim with {"device":"id","holder":"your name"} and send the returned leaseToken as X-Lease-Token on later calls.
+    A DEVICE_IN_USE error names the current holder - pick another device or wait for its lease to expire.
+  </device-leasing>
 </guide>
 
 <common-types>

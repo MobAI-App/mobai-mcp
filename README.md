@@ -76,6 +76,8 @@ The server speaks stdio — use your client's generic MCP configuration:
 | `get_device` | Get details about a specific device |
 | `start_bridge` | Start the automation bridge on a device (required before interaction) |
 | `stop_bridge` | Stop the automation bridge |
+| `claim_device` | Claim exclusive use of a device for this session (usually optional: acting on an unclaimed device auto-claims it) |
+| `release_device` | Release one or all device leases held by this session |
 
 ### Screenshots
 
