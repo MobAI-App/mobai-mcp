@@ -387,7 +387,7 @@ const TOOLS = [
   {
     name: "get_screenshot",
     description:
-      "Capture a fast, low-quality screenshot for LLM visual analysis. Returns the file path to the saved image. The image may be downscaled by an integer factor so its long edge stays ≤ 2000px; when that happens the response includes a scale factor — multiply any coordinates you read off the image by that factor before using them in device actions (tap, swipe, drag, long-press, etc.). UI tree coordinates are already in device pixels, do not scale those. Use this for AI/LLM processing only — for full-quality screenshots use save_screenshot instead.",
+      "Capture a fast, low-quality screenshot for LLM visual analysis. Returns the file path to the saved image. The image may be downscaled by an integer factor so its long edge stays ≤ 2000px; when that happens the response includes a scale factor — multiply any coordinates you read off the image by that factor before using them in device actions (tap, swipe, drag, long-press, etc.). UI tree coordinates are already in device pixels, do not scale those. Use this for AI/LLM processing only — for full-quality screenshots use save_screenshot instead. For tap coordinates of what is on screen (OCR text + named icons), use execute_dsl observe with screenshot/ocr instead.",
     inputSchema: {
       type: "object" as const,
       properties: { device_id: { type: "string", description: "Device ID" } },
@@ -466,7 +466,13 @@ const TOOLS = [
   // DSL execution
   {
     name: "execute_dsl",
-    description: `The example below is the full command surface. For richer semantics - per-action defaults, platform notes, retry/failure strategies, observe and scroll guidance, web/OCR caveats - read the MCP resource mobai://reference/device-automation. Read it the first time you hit anything the example doesn't make obvious.
+    description: `Three rules that decide whether this tool is fast or slow, plus how to recover from the most common failure. They live here, not only in the reference, because agents that never open the reference default to the slow shape (measured: one step per call and 4x the screenshots):
+1. BATCH. Pack every step you can confidently predict into ONE call, and end the script with wait_for plus observe to see the result. Split only when the next step depends on screen content you have not seen yet.
+2. Prefer observe with "ui_tree" over screenshots. The tree is faster and far cheaper in context; use a screenshot only for genuinely visual checks (layout, colour, images).
+3. TARGET BY PREDICATE, not coordinates. A predicate is precise and survives re-renders, scrolling and other screen sizes; a raw point is none of those, and a coordinate tap reports success even when it lands on the wrong element. Fall back to coords only when the element appears in neither the ui_tree nor OCR (observe with "ocr").
+4. On NO_MATCH (the most common failure by far), read the error before retrying: it lists "candidates". An off-screen candidate cannot be tapped, scroll with to_element to bring it into view. Empty candidates means the element is genuinely absent or not rendered yet, so observe or wait_for instead of guessing another predicate.
+
+The example below is the full command surface. For richer semantics - per-action defaults, platform notes, retry/failure strategies, observe and scroll guidance, web/OCR caveats - read the MCP resource mobai://reference/device-automation. Read it the first time you hit anything the example doesn't make obvious.
 
 Execute a batch of DSL commands on a device. This is the primary tool for all device interaction - tap, type, swipe, observe, launch apps, assertions, web automation, and more.
 

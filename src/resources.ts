@@ -81,6 +81,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     {"version": "0.2", "steps": [...actions...], "on_fail": {"strategy": "retry", "max_retries": 2}}
     Every script must include "version": "0.2" and a "steps" array.
     Optional "params": {"name": "default_value"} declares parameters. Callers supply values via the API; \${name} is substituted in step string fields at runtime.
+    Optional "alerts": "accept" (or "dismiss") auto-dismisses system alerts (permission prompts, crash dialogs) that block a step: checked after a failed step and after open_app, then the step retries once. accept taps the allow-style button, dismiss the deny-style one. In-app dialogs are never touched.
   </script-format>
 
   <important>
@@ -99,7 +100,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </observe-guidance>
 
   <ocr-fallback>
-    iOS only. When UI tree has suspiciously few elements but screen has more content (React Native, Flutter, custom-rendered apps, system dialogs like Sign in with Apple), use observe with "ocr". Returns text with tap coordinates for elements missing from UI tree.
+    iOS only. When UI tree has suspiciously few elements but screen has more content (React Native, Flutter, custom-rendered apps, system dialogs like Sign in with Apple), use observe with "ocr". Returns text with tap coordinates for elements missing from UI tree, plus detected icons: unlabelled glyphs (like, share, bookmark, tab bar items) located by shape and named with a shortlist of candidates, nearest first. Icons carry "distance" NOT confidence: lower = closer match (0.3 strong, 0.7 threshold). Do not read it as a probability. OCR text and icons expose ONE coordinate pair: centerX/centerY, the point to tap. Sizes are width/height around that center; there are no corner coordinates. Trust the shortlist over a screenshot squint, but resolve ambiguous names (e.g. "bookmark|payment") from screen context. A screenshot-only observe (include: ["screenshot"]) attaches OCR text and icons automatically.
   </ocr-fallback>
 
   <execution-modes>
@@ -185,10 +186,13 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <action name="open_app">
     <field name="bundle_id" required="yes"/>
-    <field name="fresh" type="bool">Kill the app before launching to ensure a clean start from the home screen. Use when the app may have been left on an arbitrary screen from a previous run.</field>
+    <field name="fresh" type="bool">Kill the app before launching to ensure a clean start from the home screen. Use when the app may have been left on an arbitrary screen from a previous run, and always with arguments/environment so they reach a new process.</field>
+    <field name="arguments" type="string[]">Process arguments for this launch only. iOS: argv, so user-default overrides and XCTest-style flags work (-AppleLanguages (en), -AppleLocale en_US, -UITesting). Android: am start intent extras/flags (--ez UITesting true, --es START_SCREEN privacy). Use to select an app's existing UI-test/demo mode, mock backend, locale, or fixture without modifying it.</field>
+    <field name="environment" type="object">Environment variables for this launch only (iOS simulator and device). Android has no per-process environment: the step fails with a capability error, never silently ignores it. Result includes "launch" echoing what was applied.</field>
     <field name="debug" type="bool">ONLY for debug-built apps (e.g. Flutter dev builds, Xcode debug builds) that need a debugger attached to run. Attaches debugserver, streams stdout/stderr to a log file; result has log_path. Do NOT use for release/App Store apps — they launch fine with debug: false.</field>
     <example>{"action": "open_app", "bundle_id": "com.apple.Preferences"}</example>
     <example>{"action": "open_app", "bundle_id": "com.apple.Preferences", "fresh": true}</example>
+    <example>{"action": "open_app", "bundle_id": "com.example.app", "fresh": true, "arguments": ["-AppleLanguages", "(en)", "-UITesting"], "environment": {"APP_START_SCREEN": "privacy-settings"}}</example>
     <note>If open_app fails or the app disappears immediately after launch, the app has likely crashed. Do NOT retry or try alternative launch methods — start crash investigation instead. Use debug: true (or metrics_start with capture_logs: true) to capture device logs, then diagnose.</note>
   </action>
 
@@ -316,7 +320,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="only_visible" type="bool" default="true">MUST be false when collecting data from scrollable lists/search results. MUST be true when interacting with elements — off-screen elements cannot be tapped.</field>
     <field name="compact" type="bool" default="false">Token-lean ui_tree: same elements as the full tree, formatted as flat [index] Type "label" #id [state] lines with coordinates and indentation removed (~2x fewer tokens). Use when selecting by id/index/text; keep false when you need coordinates or spatial layout.</field>
     <field name="filter">text_regex or bounds {"x","y","width","height"} to reduce output</field>
-    <note>OCR (iOS only): returns text with tap coordinates. Useful for system dialogs missing from UI tree.</note>
+    <note>OCR (iOS only): returns text with tap coordinates, plus detected icons named by shape (shortlist of candidates, nearest first). Useful for system dialogs and custom-rendered apps missing from UI tree. include: ["screenshot"] without ui_tree attaches OCR text and icons automatically.</note>
     <example>{"action": "observe", "include": ["ui_tree"], "filter": {"text_regex": "Settings|Wi-Fi"}}</example>
   </action>
 
@@ -596,6 +600,7 @@ const TESTING_REF = `<testing-reference>
   <actions>
     app "com.example.app"              — launch app
     app "com.example.app" fresh        — kill + launch for clean state
+    app "com.example.app" fresh arg:"-UITesting" env:"APP_MODE=1" - launch args/env (repeatable; this launch only)
     kill_app "com.example.app"         — force-close app
     tap "Text"                          — tap by text
     tap "Field" near "Label"            — tap near another element
@@ -671,6 +676,7 @@ const TESTING_REF = `<testing-reference>
     # Device: iPhone 15                 — device filter
     # Timeout: 30000                    — global timeout (ms)
     # On-Fail: abort                    — abort or continue
+    # Alerts: accept                    - auto-dismiss system alerts (permission prompts, crash dialogs); accept taps the allow-style button, dismiss the deny-style one. In-app dialogs are never touched.
     # Param: username                   — declare a parameter (no default)
     # Param: timeout = 5000             — declare with default value
   </metadata>
