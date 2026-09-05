@@ -1,7 +1,7 @@
 # MobAI MCP Server
 
-[![npm version](https://badge.fury.io/js/mobai-mcp.svg)](https://www.npmjs.com/package/mobai-mcp)
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![npm version](https://img.shields.io/npm/v/mobai-mcp.svg)](https://www.npmjs.com/package/mobai-mcp)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/license/Apache-2.0)
 
 MCP (Model Context Protocol) server for [MobAI](https://mobai.run) — AI-powered mobile device automation. Lets AI assistants (Claude Code, Cursor, Windsurf, Cline, and other MCP-compatible tools) control Android and iOS devices, emulators, and simulators via a single DSL-first interface.
 
