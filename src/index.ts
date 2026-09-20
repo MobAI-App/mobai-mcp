@@ -470,7 +470,7 @@ const TOOLS = [
 1. BATCH. Pack every step you can confidently predict into ONE call, and end the script with wait_for plus observe to see the result. Split only when the next step depends on screen content you have not seen yet.
 2. Prefer observe with "ui_tree" over screenshots. The tree is faster and far cheaper in context; use a screenshot only for genuinely visual checks (layout, colour, images).
 3. TARGET BY PREDICATE, not coordinates. A predicate is precise and survives re-renders, scrolling and other screen sizes; a raw point is none of those, and a coordinate tap reports success even when it lands on the wrong element. Fall back to coords only when the element appears in neither the ui_tree nor OCR (observe with "ocr").
-4. On NO_MATCH (the most common failure by far), read the error before retrying: it lists "candidates". An off-screen candidate cannot be tapped, scroll with to_element to bring it into view. Empty candidates means the element is genuinely absent or not rendered yet, so observe or wait_for instead of guessing another predicate.
+4. On NO_MATCH (the most common failure by far), read the error before retrying: it lists "candidates". An off-screen candidate cannot be tapped, scroll with to_element to bring it into view; add "fully_visible":true when the element is present but cut off by a toolbar or the screen edge, since a partly covered control does not reliably accept a tap. Empty candidates means the element is genuinely absent or not rendered yet, so observe or wait_for instead of guessing another predicate.
 
 The example below is the full command surface. For richer semantics - per-action defaults, platform notes, retry/failure strategies, observe and scroll guidance, web/OCR caveats - read the MCP resource mobai://reference/device-automation. Read it the first time you hit anything the example doesn't make obvious.
 
@@ -485,6 +485,7 @@ Every action below appears at least once - this is the full command surface (sem
   {"action":"open_app","bundle_id":"com.apple.Preferences","fresh":true,"debug":false},
   {"action":"kill_app","bundle_id":"com.apple.mobilesafari"},
   {"action":"open_link","url":"myapp://profile/42"},
+  {"action":"fold","state":"closed"},
   {"action":"tap","predicate":{"text_contains":"Wi-Fi","type":"button"}},
   {"action":"tap","coords":{"x":200,"y":640}},
   {"action":"double_tap","predicate":{"text":"Photo"}},
@@ -499,6 +500,7 @@ Every action below appears at least once - this is the full command surface (sem
   {"action":"swipe","direction":"up","distance":"medium"},
   {"action":"swipe","from_coords":{"x":200,"y":600},"to_coords":{"x":200,"y":200},"duration_ms":300},
   {"action":"scroll","direction":"down","to_element":{"predicate":{"text":"Privacy"}},"predicate":{"type":"scrollview"},"max_scrolls":10,"amount":"page"},
+  {"action":"scroll","direction":"down","to_element":{"predicate":{"text":"General"},"fully_visible":true}},
   {"action":"drag","from":{"predicate":{"text":"Item"}},"to_element":{"predicate":{"text":"Trash"}},"press_duration_ms":500,"hold_duration_ms":200,"duration_ms":500},
   {"action":"drag","from_coords":{"x":100,"y":400},"to_coords":{"x":300,"y":400}},
   {"action":"drag_path","points":[{"x":100,"y":400,"duration_ms":200},{"x":150,"y":300,"duration_ms":150},{"x":300,"y":500,"duration_ms":300}]},

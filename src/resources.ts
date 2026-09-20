@@ -259,10 +259,11 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     Direction = semantic (where to look), not finger movement.
     <field name="direction" required="yes">down (look below), up (look above), left (look left), right (look right). All four directions are supported - use left/right for horizontal scrollviews (carousels, palettes, paging) instead of falling back to raw-coordinate swipe.</field>
     <field name="predicate" type="Predicate">Targets a specific scrollable container so the gesture lands inside it (e.g. {"type": "scrollview"} or {"parent_of": {"text": "Work"}}). Without it the gesture is applied at screen center - set this when multiple scrollviews share the screen (e.g. a horizontal palette above a vertical list) to avoid scrolling the wrong one.</field>
-    <field name="to_element" type="TargetElement"/>
+    <field name="to_element" type="TargetElement">{"predicate": {...}} names the element to scroll to. Add "fully_visible": true to keep scrolling until the whole element is on screen instead of stopping as soon as it matches - do this before tapping something, because a control half covered by a toolbar or the screen edge does not reliably accept a tap. Defaults to false. If scrolling cannot uncover the rest, the step still succeeds with whatever is showing.</field>
     <field name="max_scrolls" type="int" default="10"/>
     <field name="amount">small, page, full</field>
     <example>{"action": "scroll", "direction": "down", "to_element": {"predicate": {"text": "Privacy"}}, "max_scrolls": 10}</example>
+    <example>{"action": "scroll", "direction": "down", "to_element": {"predicate": {"text": "General"}, "fully_visible": true}}</example>
     <example>{"action": "scroll", "direction": "right", "predicate": {"type": "scrollview"}}</example>
     <note>scroll with to_element returns "reached end of scrollable content" if the list ends before the element is found. If it returns "element not found after scrolling" instead, the list has more content — increase max_scrolls or call scroll again to continue searching.</note>
   </action>
@@ -385,6 +386,14 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="url" required="yes">Full URL or deep link, e.g. https://example.com or myapp://profile/42</field>
     <example>{"action": "open_link", "url": "myapp://profile/42"}</example>
     <example>{"action": "open_link", "url": "https://example.com"}</example>
+  </action>
+
+  <action name="fold">
+    Opens or closes a foldable iOS simulator. The step returns once the device has settled on its new screen, so the next observe, tap or screenshot already works on the screen in use, and the screen size changes with it. Closing moves the running app to the outer screen; opening moves it back to the inner one. Fails on any device that is not a foldable iOS simulator. Re-observe after folding: element positions from before the fold are no longer valid.
+    <field name="state" required="one of state or angle">closed (0 degrees), book (half open, about 100) or open (180)</field>
+    <field name="angle" required="one of state or angle">Hinge angle in degrees, 0 to 180. The inner screen is in use from roughly 90 up. Wins when both are given.</field>
+    <example>{"action": "fold", "state": "closed"}</example>
+    <example>{"action": "fold", "angle": 90}</example>
   </action>
 
   <action name="siri">
@@ -650,6 +659,7 @@ const TESTING_REF = `<testing-reference>
     set_location 40.7128,-74.0060       — simulate GPS location (lat,lon)
     reset_location                      — stop location simulation
     open_link "myapp://profile/42"      - open a URL or deep link (routes to the app)
+    fold closed                         - open or close a foldable iOS simulator: closed, book, open or degrees (fold 90)
     siri "Search YouTube for cats"      — invoke Siri with voice command (iOS only)
     observe                             — observe screen
     screenshot "dir"                    - save screenshot into dir (optional; filename auto)
