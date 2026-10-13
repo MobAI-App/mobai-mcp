@@ -82,6 +82,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     Every script must include "version": "0.2" and a "steps" array.
     Optional "params": {"name": "default_value"} declares parameters. Callers supply values via the API; \${name} is substituted in step string fields at runtime.
     Optional "alerts": "accept" (or "dismiss") auto-dismisses system alerts (permission prompts, crash dialogs) that block a step: checked after a failed step and after open_app, then the step retries once. accept taps the allow-style button, dismiss the deny-style one. In-app dialogs are never touched.
+    Optional "settle": true makes each tap wait for a moving target to stop first (up to 500ms), as .mob test runs do. Use it for a saved flow replayed without observing first; leave it off after an observe, where the screen is already still. It does not wait for an element to appear: use wait_for for that.
   </script-format>
 
   <important>
@@ -137,7 +138,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     Element not visible — use scroll with to_element to find it.
     App launches and page transitions take time — use wait_for or delay.
     Observe before acting on unfamiliar screens.
-    NO_MATCH / failed assert_exists: if the element exists off-screen, the error lists it under "candidates" — scroll to bring it into view (off-screen elements cannot be tapped). Empty candidates means it is genuinely absent or not yet rendered.
+    NO_MATCH / failed assert_exists: if the element exists off-screen, the error lists it under "candidates" — scroll to bring it into view (off-screen elements cannot be tapped). If the error says the candidates are on screen without being visible yet, the element is still appearing or is covered (keyboard, sheet): wait_for it rather than scrolling. Empty candidates means it is genuinely absent or not yet rendered.
   </troubleshooting>
 
   <device-leasing>
@@ -394,6 +395,30 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="angle" required="one of state or angle">Hinge angle in degrees, 0 to 180. The inner screen is in use from roughly 90 up. Wins when both are given.</field>
     <example>{"action": "fold", "state": "closed"}</example>
     <example>{"action": "fold", "angle": 90}</example>
+  </action>
+
+  <action name="set_permissions">
+    Grants, revokes or resets an app's permissions without a prompt, so a test starts from a known state. Run it before open_app: changing a permission the app uses terminates it. iOS simulators and Android only; fails on physical iOS and cloud devices. On a simulator, camera, notifications, health, homekit, speech and userTracking cannot be set and are skipped. On Android, a permission the app does not request is skipped.
+    <field name="bundle_id" required="yes">The app's bundle id or package name</field>
+    <field name="permissions" required="yes">Map of name to allow, deny or unset (unset makes the app ask again). Names: all, location, camera, contacts, phone, microphone, bluetooth, storage, notifications, medialibrary, photos, calendar, reminders, sms, motion, health, homekit, speech, siri, userTracking. all is applied first, so {"all": "deny", "camera": "allow"} leaves only the camera granted.</field>
+    <example>{"action": "set_permissions", "bundle_id": "com.example.app", "permissions": {"location": "allow", "notifications": "deny"}}</example>
+  </action>
+
+  <action name="select_picker">
+    Turns a wheel to the row whose text matches: an iOS PickerWheel (date, time and custom pickers) or an Android NumberPicker (TimePicker, DatePicker in spinner mode). The runner turns the wheel and reads it back, so one step replaces a swipe-and-check loop. iOS matches a row exactly or as a leading whole word ("7" picks "7 o'clock"); Android matches the text or the same number ("7" picks "07"). Target the wheel itself (type PickerWheel or NumberPicker, with an index when a picker has several), not the picker container. Fails when no wheel sits under the target or no row matches. Not for Spinner menus or lists: tap those and then tap the option.
+    <field name="predicate">The wheel; or use coords for a point inside it</field>
+    <field name="value" required="yes">The row's text</field>
+    <example>{"action": "select_picker", "predicate": {"type": "PickerWheel", "index": 1}, "value": "March"}</example>
+    <example>{"action": "select_picker", "predicate": {"type": "NumberPicker", "index": 0}, "value": "7"}</example>
+  </action>
+
+  <action name="biometrics">
+    Drives the simulated biometric sensor. iOS simulators: enroll or unenroll Face ID or Touch ID (the Simulator app's Features menu), and send one attempt that matches or fails to the app's biometric prompt. Android: send one fingerprint attempt that matches (an enrolled finger) or fails; enrolment is done in Settings on the device. A physical iPhone has no such switch. Enroll before open_app, and send match or nomatch while the app shows its prompt.
+    <field name="state" required="yes">match, nomatch, enroll or unenroll</field>
+    <field name="sensor">faceid (default on iOS) or touchid; fingerprint on Android</field>
+    <example>{"action": "biometrics", "state": "enroll", "sensor": "faceid"}</example>
+    <example>{"action": "biometrics", "state": "match"}</example>
+    <example>{"action": "biometrics", "state": "nomatch", "sensor": "fingerprint"}</example>
   </action>
 
   <action name="siri">
@@ -660,6 +685,9 @@ const TESTING_REF = `<testing-reference>
     reset_location                      — stop location simulation
     open_link "myapp://profile/42"      - open a URL or deep link (routes to the app)
     fold closed                         - open or close a foldable iOS simulator: closed, book, open or degrees (fold 90)
+    set_permissions com.app camera=allow - grant/revoke/reset app permissions: allow, deny, unset (sims, Android)
+    select_picker PickerWheel [1] "March" - turn a picker wheel (iOS) or NumberPicker (Android) to the row's text; target the wheel, not its container
+    biometrics match faceid             - match, nomatch, enroll, unenroll; faceid or touchid on iOS sims, fingerprint on Android (match/nomatch)
     siri "Search YouTube for cats"      — invoke Siri with voice command (iOS only)
     observe                             — observe screen
     screenshot "dir"                    - save screenshot into dir (optional; filename auto)
