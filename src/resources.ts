@@ -657,7 +657,7 @@ const TESTING_REF = `<testing-reference>
     type_secret "Field" → "secret-id"  - type a stored credential (value never in script/logs)
     type_secret "secret-id"             - type credential into focused field
     swipe up|down|left|right            — swipe direction
-    swipe up distance:long              — short/medium/long
+    swipe up distance:full              — short/medium/full
     swipe up duration:500               — custom duration (ms)
     swipe 100,200 to 100,800            — coordinate swipe
     scroll down                         — scroll
@@ -673,6 +673,7 @@ const TESTING_REF = `<testing-reference>
     wait_for "Element" timeout:5000     — wait for element
     wait_for type:button bounds:bottom_half timeout:3000 — modifier-only
     delay 1000                          — wait N ms
+    wait_stable timeout:3000            — wait until the screen stops changing (a modal sliding in, a list settling) before the next step
     press_key home|back|enter           — hardware key
     navigate back|home                  — navigation shortcut
     two_finger_tap "Map"                — two-finger tap
