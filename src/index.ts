@@ -728,7 +728,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       // Device leasing
       case "claim_device": {
-        const resp = await claimDevice((args?.device_id as string) || "", (args?.holder as string) || "");
+        // "device" is the HTTP route's name for it; an agent that knows that
+        // one sends it here too, and must not get some other device instead.
+        const deviceId = (args?.device_id as string) || (args?.device as string) || "";
+        const resp = await claimDevice(deviceId, (args?.holder as string) || "");
         return textResult(
           `Claimed device ${resp.deviceId} (lease expires ${resp.expiresAt}). The lease auto-renews on every action from this session; call release_device when you are done.`
         );
