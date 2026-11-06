@@ -315,7 +315,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </action>
 
   <action name="observe">
-    <field name="include">ui_tree, screenshot, activity, installed_apps, dom, ocr</field>
+    <field name="include">ui_tree, screenshot, activity, installed_apps, ocr</field>
     <field name="context">native (default) or web</field>
     <field name="store_as" type="string">Store result in named variable</field>
     <field name="include_keyboard" type="bool" default="false"/>
@@ -477,8 +477,8 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
   </action>
 
   <action name="navigate">
-    <field name="url" required="yes"/>
-    <example>{"action": "navigate", "url": "https://example.com"}</example>
+    <field name="target" required="yes">The URL to load</field>
+    <example>{"action": "navigate", "context": "web", "target": "https://example.com"}</example>
   </action>
 
   <action name="execute_js">
@@ -502,8 +502,8 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
 
   <action name="assert_count">
     <field name="predicate" required="yes"/>
-    <field name="count" type="int" required="yes"/>
-    <example>{"action": "assert_count", "predicate": {"type": "cell"}, "count": 5}</example>
+    <field name="expected" type="int" required="yes"/>
+    <example>{"action": "assert_count", "predicate": {"type": "cell"}, "expected": 5}</example>
   </action>
 
   <action name="assert_screen_changed">
@@ -529,7 +529,7 @@ const DEVICE_AUTOMATION_REF = `<device-automation-reference>
     <field name="label" type="string"/>
     <field name="bundle_id" type="string">Required for process metrics</field>
     <field name="capture_logs" type="bool">Captures iOS syslog / Android logcat at Warning/Error level as JSONL</field>
-    <field name="thresholds">{"cpu_high": 80, "fps_low": 45, "fps_jank": 30, "memory_growth_mb_min": 50, "memory_high": 85, "battery_drain_rate": 10}</field>
+    <field name="thresholds">{"cpu_high": 80, "fps_low": 30, "fps_jank": 20, "memory_growth_mb_min": 50, "memory_high": 85, "battery_drain_rate": 10}</field>
     <example>{"action": "metrics_start", "types": ["system_cpu", "fps"], "label": "login_flow"}</example>
     <example>{"action": "metrics_start", "capture_logs": true, "label": "debug_session"}</example>
   </action>
@@ -601,7 +601,7 @@ const TESTING_REF = `<testing-reference>
   "multiple elements found" — add disambiguators: type:button, type:cell, bounds:top_half, near "Label", or [index]
   "no element found" — usually timing: add wait_for before the failing line. If present, check text/type or add scroll
   "timeout" — increase timeout value or add a preceding wait_for
-  Modifier-only predicates are valid: tap type:button, wait_for type:dialog, assert_exists type:switch near "Label"
+  Modifier-only predicates are valid: tap type:button, wait_for type:input, assert_exists type:switch near "Label"
 </error-fixes>
 
 <cross-platform>
@@ -681,13 +681,13 @@ const TESTING_REF = `<testing-reference>
     pinch "Photo" scale:2.0             — pinch to zoom in
     hide_keyboard                       — dismiss keyboard
     copy_text "Field"                   — copy text from element
-    paste_text "Field"                  — paste clipboard into element
+    paste_text                          - type the clipboard into the focused field
     set_location 40.7128,-74.0060       — simulate GPS location (lat,lon)
     reset_location                      — stop location simulation
     open_link "myapp://profile/42"      - open a URL or deep link (routes to the app)
     fold closed                         - open or close a foldable iOS simulator: closed, book, open or degrees (fold 90)
     set_permissions com.app camera=allow - grant/revoke/reset app permissions: allow, deny, unset (sims, Android)
-    select_picker PickerWheel [1] "March" - turn a picker wheel (iOS) or NumberPicker (Android) to the row's text; target the wheel, not its container
+    select_picker type:PickerWheel [1] "March" - turn a picker wheel (iOS) or NumberPicker (Android) to the row's text; target the wheel, not its container
     biometrics match faceid             - match, nomatch, enroll, unenroll; faceid or touchid on iOS sims, fingerprint on Android (match/nomatch)
     siri "Search YouTube for cats"      — invoke Siri with voice command (iOS only)
     observe                             — observe screen
@@ -761,7 +761,7 @@ const TESTING_REF = `<testing-reference>
       repeat \${count} times { ... }                 - count from a param/extract
       repeat while "Loading" { delay 500 }          - while a predicate matches (loops until it disappears)
       repeat until "Done" type:button { scroll down } - until a predicate appears
-      repeat while type:spinner max:20 { ... }      - max:N overrides the safety cap (default 100)
+      repeat while "Loading" max:20 { ... }         - max:N overrides the safety cap (default 100)
       repeat while js:"vars.n < 3" { ... }          - loop while a host-JS expression is truthy
     The 0-based iteration number is available inside the body as \${repeat_index}.
     while/until/js loops fail the step if they hit the cap without resolving (so on_fail:retry etc apply). Bodies nest:
